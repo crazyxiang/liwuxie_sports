@@ -1,0 +1,10 @@
+{
+  "name": "liwuxie-app",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "篮球赛事录像回放 TV / 手机应用",
+  "scripts": {
+    "dev": "node server/dev-server.mjs"
+  }
+}

@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#06070a">
+<title>无邪体育 · NBA</title>
+<link rel="icon" type="image/svg+xml" href="assets/logos/favicon.svg">
+<link rel="stylesheet" href="assets/css/app.css">
+</head>
+<body>
+
+
+<header class="topbar">
+  <a class="brand" href="#/" aria-label="返回录像页">
+    <svg class="ball" viewBox="0 0 48 48" aria-hidden="true">
+      <circle cx="24" cy="24" r="21" fill="none" stroke="currentColor" stroke-width="2.6"/>
+      <path d="M24 3v42M3 24h42" stroke="currentColor" stroke-width="2.6"/>
+      <path d="M9 9c6 6 6 24 0 30M39 9c-6 6-6 24 0 30" fill="none" stroke="currentColor" stroke-width="2.6"/>
+    </svg>
+    <div class="brand-text">
+      <h1>无邪体育</h1>
+      <p>无邪无邪，看球真绝</p>
+      <!-- 心无邪，球自燃-->
+    </div>
+  </a>
+
+  <nav class="tabs" id="nav">
+    <button class="tab focusable is-active" data-nav="list">录像</button>
+    <button class="tab focusable" data-nav="live">直播</button>
+    <button class="tab focusable" data-nav="rank">排名</button>
+    <button class="tab focusable" data-nav="schedule">赛程</button>
+    <button class="tab focusable" data-nav="kobe">科比</button>
+  </nav>
+
+  <div class="topbar-side">
+    <span class="updated" id="updated">—</span>
+    <button class="btn refresh focusable" id="refresh">刷新</button>
+    <button class="btn focusable" data-action="author">李无邪</button>
+  </div>
+</header>
+
+<!-- 作者微信 -->
+<div class="modal" id="author-modal" hidden>
+  <div class="modal-mask" data-action="close-author"></div>
+  <div class="modal-card">
+    <h3>李无邪</h3>
+    <p>扫码加我微信</p>
+    <img src="assets/logos/wuxie-code.jpg" alt="微信二维码">
+    <button class="btn focusable" id="author-close" data-action="close-author">关闭</button>
+  </div>
+</div>
+
+<main class="main">
+  <!-- 录像列表 -->
+  <section class="screen" id="screen-list">
+  
+
+    <div class="chips" id="team-filter">
+      <button class="chip-btn focusable is-active" data-team="">全部</button>
+      <button class="chip-btn focusable" data-team="湖人">湖人</button>
+      <button class="chip-btn focusable" data-team="76人">76人</button>
+      <button class="chip-btn focusable" data-team="马刺">马刺</button>
+      <button class="chip-btn focusable" data-team="森林狼">森林狼</button>
+      <button class="chip-btn focusable" data-team="开拓者">开拓者</button>
+      <button class="chip-btn focusable" data-team="火箭">火箭</button>
+      <button class="chip-btn focusable" data-team="勇士">勇士</button>
+      <button class="chip-btn focusable" data-team="凯尔特人">凯尔特人</button>
+      <button class="chip-btn focusable" data-team="尼克斯">尼克斯</button>
+      <button class="chip-btn focusable" data-more="1" id="more-btn">更多 ▾</button>
+    </div>
+
+    <div class="more-panel" id="more-panel" hidden></div>
+
+    <div class="grid" id="grid"></div>
+
+    <div class="load-more" id="load-more" hidden>
+      <button class="btn focusable" id="load-more-btn">加载更多</button>
+    </div>
+    <div id="sentinel" class="sentinel"></div>
+    <p class="hint">
+
+      <span class="count" id="count"></span>
+
+    </p>
+  </section>
+
+  <!-- 直播 -->
+  <section class="screen" id="screen-live" hidden>
+    <div class="list-head">
+      <h2>篮球直播</h2>
+      <span class="count" id="live-count"></span>
+    </div>
+
+    <div class="chips" id="live-filter">
+      <button class="chip-btn focusable" data-live="">全部</button>
+      <button class="chip-btn focusable is-active" data-live="NBA">NBA</button>
+      <button class="chip-btn focusable" data-live="CBA">CBA</button>
+      <button class="chip-btn focusable" data-live="NBL">NBL</button>
+    </div>
+
+    <div class="live-list" id="live-list"></div>
+    <p class="hint">方向键移动 · Enter 打开直播</p>
+  </section>
+
+  <!-- 球队 / 球员排名 -->
+  <section class="screen" id="screen-rank" hidden>
+    <div class="rank-head">
+      <h2>数据排行</h2>
+      <div class="seg" id="rank-kind">
+        <button class="seg-btn focusable is-active" data-kind="team">球队数据</button>
+        <button class="seg-btn focusable" data-kind="player">球员数据</button>
+      </div>
+    </div>
+    <div class="chips" id="rank-group"></div>
+    <div id="rank-body"></div>
+  </section>
+
+  <!-- 赛程 -->
+  <section class="screen" id="screen-schedule" hidden>
+    <div class="rank-head">
+      <h2>NBA 赛程</h2>
+      <div class="sch-bar">
+        <button class="btn focusable" id="sch-prev">前一天</button>
+        <input type="date" id="sch-date" class="date-input focusable" tabindex="-1">
+        <button class="btn focusable" id="sch-today">今天</button>
+        <button class="btn focusable" id="sch-next">后一天</button>
+      </div>
+    </div>
+    <div id="sch-body"></div>
+  </section>
+
+  <!-- 科比专栏 -->
+  <section class="screen kobe" id="screen-kobe" hidden>
+    <div class="kobe-hero">
+      <img src="assets/kobe/hero.jpg" alt="Kobe Bryant">
+      <div class="kobe-hero-mask"></div>
+      <div class="kobe-hero-in">
+        <span class="kobe-eyebrow">MY IDOL · 曼巴永恒</span>
+        <h2>Kobe Bryant</h2>
+        <p class="kobe-sub">1978.08.23 — 2020.01.26 · 8 &amp; 24 </p>
+        <p class="kobe-line">「你见过凌晨四点的洛杉矶吗？」</p>
+      </div>
+    </div>
+
+    <!-- 专属 BGM -->
+    <div class="kobe-bgm">
+      <div class="kobe-bgm-head">
+        <h3>专属 BGM · 曼巴歌单</h3>
+        <span class="kobe-bgm-now" id="bgm-now"></span>
+      </div>
+      <div class="bgm-list" id="bgm-list"></div>
+      <audio id="bgm-audio" loop preload="none"></audio>
+    </div>
+
+    <div class="kobe-stats">
+      <div class="kobe-stat"><strong>5</strong><span>NBA 总冠军</span></div>
+      <div class="kobe-stat"><strong>2</strong><span>总决赛 MVP</span></div>
+      <div class="kobe-stat"><strong>1</strong><span>常规赛 MVP</span></div>
+      <div class="kobe-stat"><strong>18</strong><span>全明星</span></div>
+      <div class="kobe-stat"><strong>33,643</strong><span>生涯得分</span></div>
+      <div class="kobe-stat"><strong>81</strong><span>单场最高分</span></div>
+    </div>
+
+    <div class="kobe-split">
+      <figure class="kobe-card">
+        <img src="assets/kobe/jerseys.jpg" alt="8号与24号球衣">
+        <figcaption>8 &amp; 24 · 两件球衣，一座城</figcaption>
+      </figure>
+      <div class="kobe-copy">
+        <h3>斯台普斯的紫金信仰</h3>
+        <p>1996 年，一个 17 岁的高中生跳过大学直接走进 NBA。第 13 顺位被选中，随后被交易到洛杉矶湖人——从那天起，他再也没有换过球队。</p>
+        <p>20 个赛季，一件紫金战袍，5 座总冠军奖杯。8 号是桀骜不驯的少年，24 号是掌控一切的王者。两件球衣，同一座城。</p>
+        <ul class="kobe-points">
+          <li><b>20</b> 个赛季，只效力一支球队</li>
+          <li><b>1,346</b> 场常规赛，18 次全明星首发</li>
+          <li><b>33,643</b> 分，历史得分榜前列</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="kobe-split reverse">
+      <figure class="kobe-card">
+        <img src="assets/kobe/mamba.jpg" alt="黑曼巴">
+        <figcaption>Black Mamba · 曼巴精神</figcaption>
+      </figure>
+      <div class="kobe-copy">
+        <h3>曼巴精神</h3>
+        <p>“Mamba Mentality”不是一句口号，而是一套做事方式：每天比昨天更好一点，把每一件小事做到极致，在别人看不见的时间里默默训练。</p>
+        <div class="mamba-words">
+          <span><b>热情</b>Passion</span>
+          <span><b>执着</b>Obsession</span>
+          <span><b>严厉</b>Relentless</span>
+          <span><b>回击</b>Resilience</span>
+          <span><b>无惧</b>Fearless</span>
+        </div>
+      </div>
+    </div>
+
+    <h3 class="kobe-h3">传奇时刻</h3>
+    <div class="kobe-timeline">
+      <div class="kobe-tl"><span class="yr">1996</span><div><h4>第 13 顺位</h4><p>高中直升 NBA，被黄蜂选中后交易至湖人，穿上 8 号。</p></div></div>
+      <div class="kobe-tl"><span class="yr">1997</span><div><h4>最年轻扣篮王</h4><p>18 岁参加全明星扣篮大赛夺冠，惊艳联盟。</p></div></div>
+      <div class="kobe-tl"><span class="yr">2000-02</span><div><h4>三连冠</h4><p>与奥尼尔组成“OK 组合”，开创湖人王朝。</p></div></div>
+      <div class="kobe-tl"><span class="yr">2006</span><div><h4>81 分之夜</h4><p>对阵猛龙单场砍下 81 分，NBA 历史单场第二高分。</p></div></div>
+      <div class="kobe-tl"><span class="yr">2008</span><div><h4>常规赛 MVP</h4><p>场均 28.3 分，生涯唯一一次捧起 MVP 奖杯。</p></div></div>
+      <div class="kobe-tl"><span class="yr">2009-10</span><div><h4>两连冠 + 2×FMVP</h4><p>换穿 24 号登顶，2010 年抢七复仇凯尔特人。</p></div></div>
+      <div class="kobe-tl"><span class="yr">2016</span><div><h4>60 分谢幕</h4><p>生涯最后一战对爵士轰下 60 分，完美告别。</p></div></div>
+      <div class="kobe-tl"><span class="yr">2018</span><div><h4>奥斯卡</h4><p>《亲爱的篮球》获奥斯卡最佳动画短片。</p></div></div>
+      <div class="kobe-tl"><span class="yr">2020</span><div><h4>Mamba Forever</h4><p>8 号与 24 号球衣同时悬挂在斯台普斯穹顶。</p></div></div>
+    </div>
+
+    <div class="kobe-quotes">
+      <blockquote>「第二名只能说明你是头号输家。」</blockquote>
+      <blockquote>「总有人要赢，为什么不能是我？」</blockquote>
+      <blockquote>「英雄来了又走，传奇永不褪色。」</blockquote>
+      <blockquote>「如果你害怕失败，那你很可能会失败。」</blockquote>
+    </div>
+
+    <h3 class="kobe-h3">生涯数据</h3>
+    <div class="kobe-table">
+      <table>
+        <thead>
+          <tr><th>赛季类型</th><th>场次</th><th>得分</th><th>篮板</th><th>助攻</th><th>投篮</th><th>三分</th><th>罚球</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>常规赛</td><td>1,346</td><td>25.0</td><td>5.2</td><td>4.7</td><td>44.7%</td><td>32.9%</td><td>83.7%</td></tr>
+          <tr><td>季后赛</td><td>220</td><td>25.6</td><td>5.1</td><td>4.7</td><td>44.8%</td><td>33.1%</td><td>81.6%</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="kobe-videos-head">
+      <h3>湖人经典回放</h3>
+      <span class="count" id="kobe-count"></span>
+    </div>
+    <div class="grid" id="kobe-videos"></div>
+    <p class="kobe-note" id="kobe-note" hidden></p>
+    <p class="hint">方向键移动 · Enter 播放 · 更多湖人比赛见「录像」页</p>
+  </section>
+
+  <!-- 播放页 -->
+  <section class="screen replay" id="screen-replay" hidden>
+    <div class="player-wrap focusable" id="player-wrap" tabindex="-1">
+      <video id="player" playsinline preload="metadata"></video>
+      <iframe id="live-frame" class="live-frame" hidden scrolling="no" allow="autoplay; fullscreen; encrypted-media" allowfullscreen></iframe>
+      <div class="player-state" id="player-state">加载中…</div>
+      <div class="player-tip" id="player-tip">按 OK 全屏播放</div>
+      <div class="player-bar">
+        <span class="pb-time" id="pb-cur">00:00</span>
+        <div class="pb-track"><div class="pb-fill" id="pb-fill"></div></div>
+        <span class="pb-time" id="pb-total">--:--</span>
+      </div>
+    </div>
+    <div class="replay-side">
+      <div class="replay-head" id="replay-head"></div>
+      <div class="sources" id="sources">
+        <button class="line-btn full-btn focusable" id="full-btn">全屏播放</button>
+        <div class="lines" id="lines"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script src="assets/vendor/hls.min.js"></script>
+<script src="assets/js/app.js"></script>
+</body>
+</html>

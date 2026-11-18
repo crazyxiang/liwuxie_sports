@@ -1,0 +1,35 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.wuxie.sports'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.wuxie.sports'
+        minSdk 21
+        targetSdk 34
+        versionCode 1
+        versionName '1.0.0'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    // 直接把 app/web 当作 assets 打包，改完前端重新构建即可，不用手动复制
+    sourceSets {
+        main {
+            assets.srcDirs = ['src/main/assets', '../../app/web']
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+}
