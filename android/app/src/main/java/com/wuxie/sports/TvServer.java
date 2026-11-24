@@ -150,9 +150,13 @@ public class TvServer {
                     new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
             String requestLine = in.readLine();
             if (requestLine == null) return;
+            String rangeHeader = null;
             String header;
             while ((header = in.readLine()) != null && !header.isEmpty()) {
-                // 请求头用不到，读完即可
+                int colon = header.indexOf(':');
+                if (colon > 0 && header.substring(0, colon).trim().equalsIgnoreCase("Range")) {
+                    rangeHeader = header.substring(colon + 1).trim();
+                }
             }
 
             String[] parts = requestLine.split(" ");
@@ -166,6 +170,11 @@ public class TvServer {
             }
 
             Map<String, String> qs = parseQuery(query);
+            if (path.equals("/api/bili/video")) {
+                // 视频要支持 Range 流式转发，不能整段读进内存
+                streamBiliVideo(s.getOutputStream(), qs.get("bv"), rangeHeader);
+                return;
+            }
             Response res;
             if (path.startsWith("/api/")) {
                 res = route(path, qs);
@@ -196,6 +205,7 @@ public class TvServer {
     private static String statusText(int code) {
         switch (code) {
             case 200: return "OK";
+            case 206: return "Partial Content";
             case 400: return "Bad Request";
             case 403: return "Forbidden";
             case 404: return "Not Found";
@@ -233,6 +243,8 @@ public class TvServer {
             if (path.equals("/api/schedule")) return apiSchedule(qs);
             if (path.equals("/api/replay")) return apiReplay(qs);
             if (path.equals("/api/hls")) return apiHls(qs);
+            if (path.equals("/api/bili/cover")) return apiBiliCover(qs);
+            if (path.equals("/api/bili/view")) return apiBiliView(qs);
             return json(404, map("error", "接口不存在"));
         } catch (Exception e) {
             return json(502, map("error", "请求失败", "detail", String.valueOf(e.getMessage())));
@@ -294,6 +306,21 @@ public class TvServer {
             }, 60 * 1000L, force);
             Map<String, Object> data = new LinkedHashMap<String, Object>();
             if (value instanceof Map) data.putAll((Map<String, Object>) value);
+            // 默认只回篮球，老版本 APK 行为不变；sport=all 前端一次拿全量
+            String sport = qs.containsKey("sport") ? qs.get("sport") : "basketball";
+            List<Object> kept = new ArrayList<Object>();
+            Object raw = data.get("items");
+            if (raw instanceof List) {
+                for (Object o : (List<Object>) raw) {
+                    if (!(o instanceof Map)) continue;
+                    Map<String, Object> it = (Map<String, Object>) o;
+                    Object s = it.get("sport");
+                    String si = s == null ? "basketball" : String.valueOf(s);
+                    if (!"basketball".equals(si) && !"football".equals(si)) continue;
+                    if ("all".equals(sport) || si.equals(sport)) kept.add(it);
+                }
+            }
+            data.put("items", kept);
             long at = cachedAt("lives");
             data.put("updatedAt", at > 0 ? at : System.currentTimeMillis());
             return json(200, data);
@@ -533,6 +560,177 @@ public class TvServer {
 
     private static String fetchText(String target, String referer) throws IOException {
         return request(target, 0, referer).text();
+    }
+
+    // ---------------- B 站视频 / 封面代理 --------------
+
+    private static final String BILI_API = "https://api.bilibili.com";
+    private static final String BILI_REFER = "https://www.bilibili.com/";
+    private static final long BILI_VIEW_TTL = 6 * 60 * 60 * 1000L;
+    private static final long BILI_PLAY_TTL = 20 * 60 * 1000L;
+    private static final long BILI_COVER_TTL = 6 * 60 * 60 * 1000L;
+
+    private static boolean validBv(String bv) {
+        return bv != null && Pattern.matches("^BV[0-9A-Za-z]{10}$", bv);
+    }
+
+    /** 稿件信息（标题 / 封面 / cid / 时长），缓存 6 小时 */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> biliView(String bv) throws Exception {
+        Object value = cached("bili:view:" + bv, new Loader() {
+            @Override
+            public Object load() throws Exception {
+                String body = fetchText(BILI_API + "/x/web-interface/view?bvid=" + bv, BILI_REFER);
+                Object root = parseJson(body);
+                if (!(root instanceof Map)) throw new IOException("返回格式异常");
+                Object code = ((Map<String, Object>) root).get("code");
+                if (!"0".equals(str(code))) throw new IOException("B站返回 " + str(code));
+                Object data = ((Map<String, Object>) root).get("data");
+                if (!(data instanceof Map)) throw new IOException("稿件不存在");
+                return data;
+            }
+        }, BILI_VIEW_TTL, false);
+        return (Map<String, Object>) value;
+    }
+
+    /** 取一条可直连的 mp4 地址，缓存 20 分钟；B站链接约 2 小时过期 */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> biliPlay(final String bv) throws Exception {
+        Object value = cached("bili:play:" + bv, new Loader() {
+            @Override
+            public Object load() throws Exception {
+                Map<String, Object> view = biliView(bv);
+                String cid = num(view.get("cid"));
+                String body = fetchText(BILI_API + "/x/player/playurl?bvid=" + bv + "&cid=" + cid
+                        + "&qn=64&fnval=0&platform=html5&high_quality=1", BILI_REFER);
+                Object root = parseJson(body);
+                if (!(root instanceof Map)) throw new IOException("返回格式异常");
+                if (!"0".equals(str(((Map<String, Object>) root).get("code")))) {
+                    throw new IOException("B站取流失败 " + str(((Map<String, Object>) root).get("code")));
+                }
+                Object data = ((Map<String, Object>) root).get("data");
+                if (!(data instanceof Map)) throw new IOException("无播放数据");
+                Object durl = ((Map<String, Object>) data).get("durl");
+                if (!(durl instanceof List) || ((List<?>) durl).isEmpty()) throw new IOException("无播放地址");
+                Object first = ((List<?>) durl).get(0);
+                if (!(first instanceof Map)) throw new IOException("无播放地址");
+                String url = str(((Map<String, Object>) first).get("url"));
+                if (url.isEmpty()) throw new IOException("无播放地址");
+                Map<String, Object> out = new LinkedHashMap<String, Object>();
+                out.put("url", url);
+                return out;
+            }
+        }, BILI_PLAY_TTL, false);
+        return (Map<String, Object>) value;
+    }
+
+    private Response apiBiliView(Map<String, String> qs) {
+        String bv = qs.get("bv");
+        if (!validBv(bv)) return json(400, map("error", "bv 参数不合法"));
+        try {
+            Map<String, Object> view = biliView(bv);
+            Map<String, Object> data = new LinkedHashMap<String, Object>();
+            data.put("bv", bv);
+            data.put("title", str(view.get("title")));
+            data.put("cid", num(view.get("cid")));
+            data.put("duration", num(view.get("duration")));
+            return json(200, data);
+        } catch (Exception e) {
+            return json(502, map("error", "稿件信息获取失败", "detail", msg(e)));
+        }
+    }
+
+    private Response apiBiliCover(Map<String, String> qs) {
+        final String bv = qs.get("bv");
+        if (!validBv(bv)) return json(400, map("error", "bv 参数不合法"));
+        try {
+            Object value = cached("bili:cover:" + bv, new Loader() {
+                @Override
+                public Object load() throws Exception {
+                    Map<String, Object> view = biliView(bv);
+                    String pic = str(view.get("pic"));
+                    if (pic.isEmpty()) throw new IOException("没有封面");
+                    // B站封面多为 http，本站走 https 时会被浏览器拦，统一改写
+                    if (pic.startsWith("http://")) pic = "https://" + pic.substring(7);
+                    return request(pic, 0, BILI_REFER);
+                }
+            }, BILI_COVER_TTL, false);
+            if (!(value instanceof HttpResult)) return json(502, map("error", "封面获取失败"));
+            HttpResult pic = (HttpResult) value;
+            String type = pic.contentType;
+            if (type == null || type.isEmpty() || !type.startsWith("image/")) type = "image/jpeg";
+            return new Response(200, type, pic.bytes, "public, max-age=21600");
+        } catch (Exception e) {
+            return json(502, map("error", "封面获取失败", "detail", msg(e)));
+        }
+    }
+
+    /** 把 B 站 mp4 边读边转发给 WebView，Range 原样透传，支持拖动进度条 */
+    private void streamBiliVideo(OutputStream out, String bv, String range) {
+        if (!validBv(bv)) {
+            try {
+                write(out, json(400, map("error", "bv 参数不合法")));
+            } catch (IOException ignored) {
+            }
+            return;
+        }
+        HttpURLConnection conn = null;
+        InputStream is = null;
+        try {
+            Map<String, Object> play = biliPlay(bv);
+            String target = str(play.get("url"));
+            if (target.isEmpty()) {
+                write(out, json(502, map("error", "取流失败")));
+                return;
+            }
+
+            conn = (HttpURLConnection) new URL(target).openConnection();
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(30000);
+            conn.setInstanceFollowRedirects(true);
+            conn.setRequestProperty("User-Agent", UA);
+            conn.setRequestProperty("Referer", BILI_REFER);
+            conn.setRequestProperty("Accept", "*/*");
+            if (range != null && range.startsWith("bytes=")) conn.setRequestProperty("Range", range);
+
+            int code = conn.getResponseCode();
+            if (code != 200 && code != 206) {
+                write(out, json(502, map("error", "上游返回 " + code)));
+                return;
+            }
+
+            long length = conn.getContentLengthLong();
+            String contentRange = conn.getHeaderField("Content-Range");
+
+            StringBuilder head = new StringBuilder();
+            head.append("HTTP/1.1 ").append(code).append(' ').append(statusText(code)).append("\r\n");
+            head.append("Content-Type: video/mp4\r\n");
+            if (length > 0) head.append("Content-Length: ").append(length).append("\r\n");
+            head.append("Accept-Ranges: bytes\r\n");
+            if (contentRange != null && !contentRange.isEmpty()) {
+                head.append("Content-Range: ").append(contentRange).append("\r\n");
+            }
+            head.append("Access-Control-Allow-Origin: *\r\n");
+            head.append("Cache-Control: no-store\r\n");
+            head.append("Connection: close\r\n\r\n");
+            out.write(head.toString().getBytes(StandardCharsets.UTF_8));
+
+            is = conn.getInputStream();
+            byte[] buffer = new byte[16384];
+            int n;
+            while ((n = is.read(buffer)) > 0) out.write(buffer, 0, n);
+            out.flush();
+        } catch (Exception ignored) {
+            // 客户端中途退出或上游超时，关掉连接即可
+        } finally {
+            if (is != null) {
+                try {
+                    is.close();
+                } catch (IOException ignored) {
+                }
+            }
+            if (conn != null) conn.disconnect();
+        }
     }
 
     // ---------------- 解析：回放列表 / 详情 ----------------
@@ -890,7 +1088,11 @@ public class TvServer {
             Matcher lidM = Pattern.compile("data-lid=\"([^\"]+)\"").matcher(raw);
             String lid = lidM.find() ? lidM.group(1) : "";
             String[] lidParts = lid.split(",");
-            if (lidParts.length < 2 || !"2".equals(lidParts[1])) continue;
+            if (lidParts.length < 2) continue;
+            String sportType = lidParts[1];
+            // 项目 1 足球 / 2 篮球
+            if (!"1".equals(sportType) && !"2".equals(sportType)) continue;
+            String sport = "1".equals(sportType) ? "football" : "basketball";
 
             String league = innerText(raw, "<li class=\"lab_events\"[^>]*><span class=\"name\">([^<]*)</span>");
             String time = innerText(raw, "<li class=\"lab_time\">([^<]*)</li>");
@@ -923,6 +1125,7 @@ public class TvServer {
 
             Map<String, Object> item = new LinkedHashMap<String, Object>();
             item.put("id", lid);
+            item.put("sport", sport);
             item.put("league", league);
             item.put("time", time);
             item.put("status", status);

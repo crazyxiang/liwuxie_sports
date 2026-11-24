@@ -60,7 +60,8 @@ public class MainActivity extends Activity {
         settings.setDomStorageEnabled(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setAllowFileAccess(true);
-        settings.setLoadWithOverviewMode(true);
+        // 有 viewport meta 时不要再按“缩放到整页”渲染，否则手机上会整页缩小、出现横向滚动
+        settings.setLoadWithOverviewMode(false);
         settings.setUseWideViewPort(true);
         settings.setJavaScriptCanOpenWindowsAutomatically(true);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);

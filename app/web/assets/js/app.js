@@ -829,21 +829,41 @@
     '</button>';
   }
 
+  /** 直播页当前的体育项目：足球 tab 独立，其他 tab 都是篮球 */
+  function liveSport() {
+    return state.live.filter === '足球' ? 'football' : 'basketball';
+  }
+
+  function syncLiveTitle() {
+    var t = document.getElementById('live-title');
+    if (!t) return;
+    var f = state.live.filter;
+    t.textContent = f === '足球' ? '足球直播' : '篮球直播';
+  }
+
   function visibleLives() {
     var filter = state.live.filter;
     return state.live.items.filter(function (it) {
+      var sport = it.sport || 'basketball';
+      // 足球 tab：只看足球；其余 tab（含「全部」）仍然只看篮球
+      if (sport === 'football') return filter === '足球';
+      if (filter === '足球') return false;
       return !filter || (it.league || '').indexOf(filter) >= 0;
     });
   }
 
   function renderLives() {
     var items = visibleLives();
+    var isFootball = state.live.filter === '足球';
+    syncLiveTitle();
     el.liveCount.textContent = items.length ? '共 ' + items.length + ' 场' : '';
 
     if (!items.length) {
-      el.liveList.innerHTML =
-        '<div class="notice"><strong>今日暂无' + esc(state.live.filter || 'NBA') + '直播</strong>' +
-        '<span>可明天再看，也可以切到「全部」看看其他篮球赛事</span></div>';
+      el.liveList.innerHTML = isFootball
+        ? '<div class="notice"><strong>今日暂无足球直播</strong>' +
+          '<span>可明天再看，也可以切到「全部」看看今天的篮球赛事</span></div>'
+        : '<div class="notice"><strong>今日暂无' + esc(state.live.filter || 'NBA') + '直播</strong>' +
+          '<span>可明天再看，也可以切到「全部」看看其他篮球赛事</span></div>';
       return;
     }
 
@@ -860,9 +880,9 @@
     state.live.loading = true;
     el.liveCount.textContent = '';
     el.liveList.innerHTML =
-      '<div class="notice"><strong>直播加载中…</strong><span>正在拉取最新篮球赛程</span></div>';
+      '<div class="notice"><strong>直播加载中…</strong><span>正在拉取最新赛程</span></div>';
 
-    fetch(api('/api/lives' + (force ? '?refresh=1' : '')))
+    fetch(api('/api/lives?sport=all' + (force ? '&refresh=1' : '')))
       .then(function (res) {
         return res.json().then(function (data) {
           if (data.error) throw new Error(data.detail || data.error);
@@ -2050,6 +2070,7 @@
       for (var c = 0; c < chips.length; c++) {
         chips[c].classList.toggle('is-active', (chips[c].dataset.live || '') === state.live.filter);
       }
+      syncLiveTitle();
       renderLives();
       return;
     }

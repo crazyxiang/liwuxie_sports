@@ -316,7 +316,10 @@ function parseLives(js, hosts) {
 
   for (const raw of js.split('<ul class="item play').slice(1)) {
     const lid = (raw.match(/data-lid="([^"]+)"/) || [])[1] || '';
-    if (lid.split(',')[1] !== '2') continue; // 只要篮球
+    const sportType = lid.split(',')[1];
+    // 项目 1 足球 / 2 篮球
+    if (sportType !== '1' && sportType !== '2') continue;
+    const sport = sportType === '1' ? 'football' : 'basketball';
 
     const league = innerText(raw, /<li class="lab_events"[^>]*><span class="name">([^<]*)<\/span>/);
     const time = innerText(raw, /<li class="lab_time">([^<]*)<\/li>/);
@@ -340,6 +343,7 @@ function parseLives(js, hosts) {
 
     items.push({
       id: lid,
+      sport,
       league,
       time,
       status,
@@ -764,10 +768,14 @@ async function handleApi(url, request, env, ctx) {
 
   if (url.pathname === '/api/lives') {
     const force = url.searchParams.get('refresh') === '1';
+    // 默认只回篮球，保证老版本 APK 行为不变；sport=all 一次拿全量再前端切
+    const sport = url.searchParams.get('sport') || 'basketball';
     try {
       return await cachedJson(new Request(`${url.origin}/api/lives`), force ? 1 : 60, async () => {
         const data = await fetchLives();
-        return { ...data, updatedAt: Date.now() };
+        const all = (data.items || []).filter((it) => it.sport === 'basketball' || it.sport === 'football');
+        const items = sport === 'all' ? all : all.filter((it) => (it.sport || 'basketball') === sport);
+        return { ...data, items, updatedAt: Date.now() };
       }, { ctx, force });
     } catch (err) {
       return json({ error: '直播列表加载失败', detail: String(err.message || err) }, 502);

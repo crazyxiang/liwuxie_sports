@@ -12,6 +12,7 @@ import http from 'node:http';
 import https from 'node:https';
 import fs from 'node:fs';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(fileURLToPath(new URL('../app/web', import.meta.url)));
@@ -38,7 +39,8 @@ const MIME = {
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
-  '.ico': 'image/x-icon'
+  '.ico': 'image/x-icon',
+  '.apk': 'application/vnd.android.package-archive'
 };
 
 // ---------------- 抓取 ----------------
@@ -378,7 +380,10 @@ function parseLives(js, hosts) {
 
   for (const raw of js.split('<ul class="item play').slice(1)) {
     const lid = (raw.match(/data-lid="([^"]+)"/) || [])[1] || '';
-    if (lid.split(',')[1] !== '2') continue; // 只要篮球
+    const sportType = lid.split(',')[1];
+    // 项目 1 足球 / 2 篮球，其他项目（网球、电竞等）不要
+    if (sportType !== '1' && sportType !== '2') continue;
+    const sport = sportType === '1' ? 'football' : 'basketball';
 
     const league = innerText(raw, /<li class="lab_events"[^>]*><span class="name">([^<]*)<\/span>/);
     const time = innerText(raw, /<li class="lab_time">([^<]*)<\/li>/);
@@ -403,6 +408,7 @@ function parseLives(js, hosts) {
 
     items.push({
       id: lid,
+      sport,
       league,
       time,
       status,
@@ -529,7 +535,137 @@ function json(res, code, data) {
   res.end(JSON.stringify(data));
 }
 
+// ---------------- B 站视频 / 封面（科比经典视频） ---------------
+
+const BILI_API = 'https://api.bilibili.com';
+const BILI_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+  '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const BILI_REF = 'https://www.bilibili.com/';
+const biliCache = new Map();
+
+/** BV 号 12 位，av 号纯数字 */
+function isBiliId(id) {
+  return /^BV[0-9A-Za-z]{10}$/.test(id) || /^av\d+$/.test(id);
+}
+
+async function biliGet(pathname) {
+  const r = await fetch(BILI_API + pathname, {
+    headers: { 'User-Agent': BILI_UA, Referer: BILI_REF }
+  });
+  if (!r.ok) throw new Error('bilibili HTTP ' + r.status);
+  const data = await r.json();
+  if (data.code !== 0) throw new Error(data.message || 'bilibili code ' + data.code);
+  return data.data;
+}
+
+/** 稿件基础信息（标题 / 时长 / 封面），缓存 6 小时 */
+async function biliView(id) {
+  const key = 'view:' + id;
+  const hit = biliCache.get(key);
+  if (hit && Date.now() - hit.at < 6 * 60 * 60 * 1000) return hit.data;
+
+  const view = await biliGet(
+    id.startsWith('av')
+      ? `/x/web-interface/view?aid=${id.slice(2)}`
+      : `/x/web-interface/view?bvid=${id}`
+  );
+  biliCache.set(key, { at: Date.now(), data: view });
+  return view;
+}
+
+/** 取可直接播放的 mp4 地址（B 站链接约 2 小时过期，所以每次现取并短缓存） */
+async function biliPlay(id) {
+  const view = await biliView(id);
+  const key = 'play:' + view.bvid;
+  const hit = biliCache.get(key);
+  if (hit && Date.now() - hit.at < 20 * 60 * 1000) return hit.data;
+
+  const play = await biliGet(
+    `/x/player/playurl?bvid=${view.bvid}&cid=${view.cid}&qn=64&fnval=0&platform=html5&high_quality=1`
+  );
+  const durl = (play && play.durl) || [];
+  if (!durl.length) throw new Error('没有可播放片源');
+
+  const data = { url: durl[0].url, title: view.title, duration: view.duration, cover: view.pic };
+  biliCache.set(key, { at: Date.now(), data });
+  return data;
+}
+
+/** 视频转发：把 Range 透传给 B 站，浏览器 / 电视才能拖动进度 */
+async function handleBiliVideo(req, res, url) {
+  const id = url.searchParams.get('bv') || '';
+  if (!isBiliId(id)) return json(res, 400, { error: 'bv 不合法' });
+
+  try {
+    const info = await biliPlay(id);
+    const headers = { 'User-Agent': BILI_UA, Referer: BILI_REF, Origin: BILI_REF };
+    if (req.headers.range) headers.Range = req.headers.range;
+
+    const up = await fetch(info.url, { headers });
+    if (up.status !== 200 && up.status !== 206) {
+      return json(res, 502, { error: '片源不可用', detail: 'HTTP ' + up.status });
+    }
+
+    const out = {
+      'Content-Type': up.headers.get('content-type') || 'video/mp4',
+      'Accept-Ranges': 'bytes',
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'no-store'
+    };
+    const len = up.headers.get('content-length');
+    const range = up.headers.get('content-range');
+    if (len) out['Content-Length'] = len;
+    if (range) out['Content-Range'] = range;
+
+    res.writeHead(up.status, out);
+    Readable.fromWeb(up.body).pipe(res);
+  } catch (err) {
+    return json(res, 502, { error: '视频加载失败', detail: String(err.message || err) });
+  }
+}
+
+/** 封面转发：B 站图片带防盗链，加 Referer 才能取到 */
+async function handleBiliCover(req, res, url) {
+  const id = url.searchParams.get('bv') || '';
+  if (!isBiliId(id)) return json(res, 400, { error: 'bv 不合法' });
+
+  try {
+    const view = await biliView(id);
+    const pic = String(view.pic || '');
+    let p;
+    try {
+      p = new URL(pic);
+    } catch {
+      return json(res, 404, { error: '没有封面' });
+    }
+    if (p.protocol !== 'http:' && p.protocol !== 'https:') {
+      return json(res, 403, { error: '封面地址未授权' });
+    }
+    if (!/(^|\.)hdslb\.com$/i.test(p.hostname)) {
+      return json(res, 403, { error: '封面地址未授权' });
+    }
+    // B 站封面常给 http，统一走 https 取
+    const picUrl = 'https://' + p.hostname + p.pathname + p.search;
+
+    const up = await fetch(picUrl, { headers: { 'User-Agent': BILI_UA, Referer: BILI_REF } });
+    if (!up.ok) return json(res, 404, { error: '封面不可用' });
+
+    res.writeHead(200, {
+      'Content-Type': up.headers.get('content-type') || 'image/jpeg',
+      'Cache-Control': 'public, max-age=3600',
+      'Access-Control-Allow-Origin': '*'
+    });
+    Readable.fromWeb(up.body).pipe(res);
+  } catch (err) {
+    return json(res, 502, { error: '封面加载失败', detail: String(err.message || err) });
+  }
+}
+
 async function handleApi(req, res, url) {
+  if (url.pathname === '/api/bili/video') return handleBiliVideo(req, res, url);
+  if (url.pathname === '/api/bili/cover') return handleBiliCover(req, res, url);
+
   if (url.pathname === '/api/replays') {
     const category = url.searchParams.get('category') || 'basketball';
     const page = Math.max(1, Number(url.searchParams.get('page')) || 1);
@@ -563,7 +699,11 @@ async function handleApi(req, res, url) {
         force: url.searchParams.get('refresh') === '1',
         disk: false
       });
-      return json(res, 200, { ...data, updatedAt: (cache.get(key) || {}).at || Date.now() });
+      // 默认只回篮球，保证老版本 APK 行为不变；sport=all 一次拿全量
+      const sport = url.searchParams.get('sport') || 'basketball';
+      const all = (data.items || []).filter((it) => it.sport === 'basketball' || it.sport === 'football');
+      const items = sport === 'all' ? all : all.filter((it) => (it.sport || 'basketball') === sport);
+      return json(res, 200, { ...data, items, updatedAt: (cache.get(key) || {}).at || Date.now() });
     } catch (err) {
       return json(res, 502, { error: '直播列表加载失败', detail: String(err.message || err) });
     }
@@ -690,6 +830,37 @@ async function handleApi(req, res, url) {
 
 function serveStatic(res, pathname) {
   const rel = pathname === '/' ? '/index.html' : pathname;
+
+  // 安装包放在项目根目录 apk_package/，不在 app/web 里（否则会被打进 APK 自身）
+  if (rel.indexOf('/apk_package/') === 0) {
+    let name = '';
+    try {
+      name = decodeURIComponent(rel.slice('/apk_package/'.length));
+    } catch (err) {
+      res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' }).end('400 Bad Request');
+      return;
+    }
+    if (!/^[A-Za-z0-9._-]+\.apk$/i.test(name)) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('404 Not Found');
+      return;
+    }
+    const file = path.join(path.resolve(ROOT, '../..'), 'apk_package', name);
+    fs.readFile(file, (err, buf) => {
+      if (err) {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('404 Not Found');
+        return;
+      }
+      res.writeHead(200, {
+        'Content-Type': 'application/vnd.android.package-archive',
+        'Content-Disposition': `attachment; filename="${name}"`,
+        'Content-Length': buf.length,
+        'Cache-Control': 'no-store'
+      });
+      res.end(buf);
+    });
+    return;
+  }
+
   const file = path.join(ROOT, decodeURIComponent(rel));
 
   if (!file.startsWith(ROOT)) {
