@@ -156,13 +156,14 @@
   <!-- 科比专栏 -->
   <section class="screen kobe" id="screen-kobe" hidden>
 
-    <div class="kobe-hero">
+    <div class="kobe-hero" id="kobe-hero">
       <div class="kobe-hero-media" id="kobe-hero-media">
         <div class="kh-slide is-on">
           <img src="assets/kobe/hero.jpg" alt="Kobe Bryant">
         </div>
       </div>
       <div class="kobe-hero-mask"></div>
+      <button class="kobe-hero-play" id="kobe-hero-play" type="button" aria-label="播放或暂停视频" hidden>▶</button>
       <div class="kobe-hero-in">
         <span class="kobe-eyebrow">MY IDOL · 曼巴永恒</span>
         <h2 id="kobe-hero-title">Kobe Bryant</h2>
@@ -283,7 +284,10 @@
 
     <div class="kobe-lightbox" id="kobe-lightbox" hidden>
       <button class="kobe-lb-close focusable" id="kobe-lb-close" type="button" aria-label="关闭">×</button>
+      <button class="kobe-lb-nav kobe-lb-prev" id="kobe-lb-prev" type="button" aria-label="上一张">‹</button>
       <img id="kobe-lb-img" alt="曼巴精神">
+      <button class="kobe-lb-nav kobe-lb-next" id="kobe-lb-next" type="button" aria-label="下一张">›</button>
+      <div class="kobe-lb-count" id="kobe-lb-count"></div>
       <div class="kobe-lb-cap" id="kobe-lb-cap"></div>
     </div>
 

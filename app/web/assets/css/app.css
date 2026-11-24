@@ -1090,6 +1090,12 @@ body.is-web .pb-full { display: inline-flex; }
   border: 1px solid rgba(253, 185, 39, 0.22);
   background: #0a0712;
   box-shadow: 0 26px 64px rgba(0, 0, 0, 0.62);
+  cursor: grab;
+  touch-action: pan-y;
+}
+
+.kobe-hero.is-dragging {
+  cursor: grabbing;
 }
 
 .kobe-hero > img {
@@ -1105,6 +1111,12 @@ body.is-web .pb-full { display: inline-flex; }
   position: absolute;
   inset: 0;
   background: #08050f;
+  transition: transform .28s ease;
+  will-change: transform;
+}
+
+.kobe-hero.is-dragging .kobe-hero-media {
+  transition: none;
 }
 
 .kh-slide {
@@ -1127,6 +1139,8 @@ body.is-web .pb-full { display: inline-flex; }
   object-fit: cover;
   object-position: center 30%;
   display: block;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 .kobe-hero-dots {
@@ -1153,6 +1167,35 @@ body.is-web .pb-full { display: inline-flex; }
   width: 40px;
   background: var(--kobe-gold);
   box-shadow: 0 0 12px rgba(253, 185, 39, .7);
+}
+
+.kobe-hero-play {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 7;
+  width: 54px;
+  height: 54px;
+  margin: -27px 0 0 -27px;
+  padding: 0 0 0 4px;
+  border: 1px solid rgba(253, 185, 39, .6);
+  border-radius: 50%;
+  color: #fdb927;
+  background: rgba(8, 5, 15, .62);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, .5);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+}
+
+.kobe-hero-play[hidden] { display: none; }
+
+.kobe-hero-play:hover,
+.kobe-hero-play:focus-visible {
+  color: #1b0b2b;
+  background: var(--kobe-gold);
+  outline: none;
 }
 
 .kobe-hero-mask {
@@ -1340,8 +1383,13 @@ body.is-web .pb-full { display: inline-flex; }
 /* 曼巴精神组图轮播 */
 .spirit-card {
   position: relative;
-  cursor: pointer;
+  cursor: grab;
   outline: none;
+  touch-action: pan-y;
+}
+
+.spirit-card.is-dragging {
+  cursor: grabbing;
 }
 
 .spirit-card.focused,
@@ -1354,6 +1402,13 @@ body.is-web .pb-full { display: inline-flex; }
   position: relative;
   aspect-ratio: 4 / 3;
   background: #0b0813;
+  overflow: hidden;
+  transition: transform .28s ease;
+  will-change: transform;
+}
+
+.spirit-card.is-dragging .spirit-track {
+  transition: none;
 }
 
 .spirit-slide {
@@ -1423,6 +1478,11 @@ body.is-web .pb-full { display: inline-flex; }
   justify-content: center;
   padding: 40px;
   background: rgba(4, 3, 8, .94);
+  touch-action: pan-y;
+}
+
+.kobe-lightbox.is-dragging {
+  cursor: grabbing;
 }
 
 .kobe-lightbox[hidden] { display: none; }
@@ -1433,6 +1493,14 @@ body.is-web .pb-full { display: inline-flex; }
   border-radius: 14px;
   object-fit: contain;
   box-shadow: 0 30px 80px rgba(0, 0, 0, .7);
+  user-select: none;
+  -webkit-user-drag: none;
+  transition: transform .28s ease;
+  will-change: transform;
+}
+
+.kobe-lightbox.is-dragging img {
+  transition: none;
 }
 
 .kobe-lb-close {
@@ -1453,6 +1521,41 @@ body.is-web .pb-full { display: inline-flex; }
 .kobe-lb-close.focused {
   border-color: var(--kobe-gold);
   box-shadow: 0 0 0 3px rgba(253, 185, 39, .4);
+}
+
+.kobe-lb-nav {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  width: 52px;
+  height: 72px;
+  margin-top: -36px;
+  border: 0;
+  border-radius: 12px;
+  color: #fff;
+  background: rgba(255, 255, 255, .08);
+  font-size: 38px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background .2s, color .2s;
+}
+
+.kobe-lb-nav:hover {
+  color: #1b0b2b;
+  background: var(--kobe-gold);
+}
+
+.kobe-lb-prev { left: max(10px, 2.2vw); }
+.kobe-lb-next { right: max(10px, 2.2vw); }
+
+.kobe-lb-count {
+  position: absolute;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: #cbb3e8;
 }
 
 .kobe-lb-cap {
@@ -1988,6 +2091,9 @@ body.is-web .pb-full { display: inline-flex; }
   .kobe-hero-in { left: 18px; right: 18px; bottom: 18px; max-width: none; }
   .kobe-eyebrow { font-size: 10.5px; letter-spacing: 2.5px; }
   .kobe-sub { font-size: 10.5px; }
+  .kobe-hero-play { width: 46px; height: 46px; margin: -23px 0 0 -23px; font-size: 17px; }
+  .kobe-lb-nav { width: 38px; height: 52px; margin-top: -26px; font-size: 27px; border-radius: 9px; }
+  .kobe-lb-count { top: 16px; font-size: 11px; letter-spacing: 1px; }
   .kobe-line { margin-top: 10px; font-size: 12.5px; }
   .kobe-hero-dots { right: 14px; bottom: 12px; gap: 5px; }
   .kobe-hero-dot { width: 18px; }

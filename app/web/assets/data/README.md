@@ -20,7 +20,7 @@ App / 网页不会直接跨域拉 GitHub，而是请求 `/api/kobe`，由本机�
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "updatedAt": "2026-11-25T00:00:00.000Z",
   "hero": {
     "interval": 5000,
@@ -34,11 +34,12 @@ App / 网页不会直接跨域拉 GitHub，而是请求 `/api/kobe`，由本机�
       },
       {
         "type": "video",
-        "src": "https://example.com/hero.mp4",
-        "poster": "assets/kobe/hero.jpg",
-        "title": "Mamba Forever",
-        "sub": "",
-        "line": ""
+        "src": "assets/kobe/hero/kobe-moments.mp4",
+        "poster": "assets/kobe/hero/kobe-moments.jpg",
+        "autoplay": true,
+        "title": "Mamba Moments",
+        "sub": "生涯高光 · 24 秒",
+        "line": "每一帧，都是曼巴"
       }
     ]
   },
@@ -65,10 +66,13 @@ App / 网页不会直接跨域拉 GitHub，而是请求 `/api/kobe`，由本机�
 
 ### hero
 
-- `type`: `image` 或 `video`；视频建议 mp4，`muted` 自动播放，`poster` 可选。
+- `type`: `image` 或 `video`；视频建议 mp4，静音播放，`poster` 是没播放时显示的封面。
+- `autoplay`: 仅视频有效。`true` 进入这一屏自动播放并等它播完再切下一张；`false` 只显示封面，点画面/播放键才播。
 - `src`: 相对路径（打包在 APK 里）或 https 绝对地址。
 - `title/sub/line`: 覆盖 hero 上的标题、副标题、金句；留空则不显示对应文字。
-- `interval`: 自动切换毫秒数，最少 2500。
+- `interval`: 图片自动切换毫秒数，最少 2500；视频播放时按视频时长走。
+- 手机/桌面都支持按住画面左右拖动切换；桌面鼠标、触屏都生效。
+- 内置的 `assets/kobe/hero/kobe-moments.mp4` 是 24 秒高光剪辑（素材来自 B 站 BV1ZVLQ6JE72，仅作球迷站展示）；想换素材，直接覆盖同名文件或在 JSON 里改 `src`。
 
 ### bgm
 
@@ -77,7 +81,7 @@ App / 网页不会直接跨域拉 GitHub，而是请求 `/api/kobe`，由本机�
 
 ### spirit
 
-- `images` 是曼巴精神组图，自动轮播，点击/按 OK 可放大。
+- `images` 是曼巴精神组图，自动轮播，支持左右拖动/滑动切换；点击/按 OK 放大后，仍可左右切换、点两侧箭头切图。
 - 建议 4:3、宽度 1400px 左右，单张控制在 300KB 内。
 
 ### videoGroups / items

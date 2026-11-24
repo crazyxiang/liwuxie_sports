@@ -1,6 +1,6 @@
 {
-  "version": 1,
-  "updatedAt": "2026-11-24T17:12:15.893Z",
+  "version": 2,
+  "updatedAt": "2026-11-24T18:30:00.000Z",
   "note": "科比页远程数据。改完提交到 GitHub 即可热更新，无需重装 APK。",
   "hero": {
     "interval": 5000,
@@ -11,6 +11,15 @@
         "title": "Kobe Bryant",
         "sub": "1978.08.23 — 2020.01.26 · 8 & 24",
         "line": "「你见过凌晨四点的洛杉矶吗？」"
+      },
+      {
+        "type": "video",
+        "src": "assets/kobe/hero/kobe-moments.mp4",
+        "poster": "assets/kobe/hero/kobe-moments.jpg",
+        "autoplay": true,
+        "title": "Mamba Moments",
+        "sub": "生涯高光 · 24 秒",
+        "line": "每一帧，都是曼巴"
       },
       {
         "type": "image",

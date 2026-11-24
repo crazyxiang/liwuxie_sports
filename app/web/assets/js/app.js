@@ -160,8 +160,10 @@
     kcCats: document.getElementById('kc-cats'),
 
     // 科比页 hero / 曼巴精神轮播
+    hero: document.getElementById('kobe-hero'),
     heroMedia: document.getElementById('kobe-hero-media'),
     heroDots: document.getElementById('kobe-hero-dots'),
+    heroPlay: document.getElementById('kobe-hero-play'),
     heroTitle: document.getElementById('kobe-hero-title'),
     heroSub: document.getElementById('kobe-hero-sub'),
     heroLine: document.getElementById('kobe-hero-line'),
@@ -172,6 +174,9 @@
     lightbox: document.getElementById('kobe-lightbox'),
     lbImg: document.getElementById('kobe-lb-img'),
     lbCap: document.getElementById('kobe-lb-cap'),
+    lbCount: document.getElementById('kobe-lb-count'),
+    lbPrev: document.getElementById('kobe-lb-prev'),
+    lbNext: document.getElementById('kobe-lb-next'),
     lbClose: document.getElementById('kobe-lb-close')
   };
 
@@ -1127,9 +1132,16 @@
 
   var heroIdx = 0;
   var heroTimer = null;
+  var heroDragState = null;
+  var heroDragBlock = false;
 
   function heroSlides() {
     return (kobeData.hero && kobeData.hero.slides) || [];
+  }
+
+  function heroVideoAt(i) {
+    var box = el.heroMedia && el.heroMedia.querySelector('.kh-slide[data-hero="' + i + '"]');
+    return box ? box.querySelector('video') : null;
   }
 
   function renderKobeHero() {
@@ -1139,7 +1151,9 @@
 
     el.heroMedia.innerHTML = slides.map(function (s, i) {
       var media = s.type === 'video'
-        ? '<video muted loop playsinline preload="none"' + (s.poster ? ' poster="' + esc(s.poster) + '"' : '') + ' src="' + esc(s.src) + '"></video>'
+        ? '<video muted playsinline webkit-playsinline preload="none"' +
+          (s.poster ? ' poster="' + esc(s.poster) + '"' : '') +
+          ' src="' + esc(s.src) + '"></video>'
         : '<img src="' + esc(s.src) + '" alt="">';
       return '<div class="kh-slide' + (i === 0 ? ' is-on' : '') + '" data-hero="' + i + '">' + media + '</div>';
     }).join('');
@@ -1150,9 +1164,23 @@
       }).join('') : '';
     }
 
+    var vids = el.heroMedia.querySelectorAll('video');
+    for (var v = 0; v < vids.length; v++) {
+      (function (vid) {
+        vid.addEventListener('ended', function () {
+          var box = vid.parentNode;
+          if (state.screen === 'kobe' && box && box.classList.contains('is-on')) applyHeroSlide(heroIdx + 1);
+        });
+        vid.addEventListener('loadedmetadata', function () {
+          if (state.screen === 'kobe' && vid.parentNode.classList.contains('is-on')) restartHeroTimer();
+        });
+        vid.addEventListener('play', syncHeroPlayBtn);
+        vid.addEventListener('pause', syncHeroPlayBtn);
+      })(vids[v]);
+    }
+
     heroIdx = 0;
     applyHeroSlide(0);
-    restartHeroTimer();
   }
 
   function applyHeroSlide(i) {
@@ -1162,14 +1190,26 @@
     var boxes = el.heroMedia.querySelectorAll('.kh-slide');
     for (var k = 0; k < boxes.length; k++) {
       var on = k === heroIdx;
+      var wasOn = boxes[k].classList.contains('is-on');
       boxes[k].classList.toggle('is-on', on);
       var vid = boxes[k].querySelector('video');
       if (vid) {
         if (on) {
-          var p = vid.play();
-          if (p && p.catch) p.catch(function () {});
+          var slide = slides[heroIdx];
+          if (!wasOn) {
+            try { vid.currentTime = 0; } catch (err) { /* 忽略 */ }
+          }
+          if (slide.autoplay !== false) {
+            var p = vid.play();
+            if (p && p.catch) p.catch(function () { syncHeroPlayBtn(); });
+          } else {
+            try { vid.pause(); } catch (err2) { /* 忽略 */ }
+          }
         } else {
-          try { vid.pause(); vid.currentTime = 0; } catch (err) { /* 忽略 */ }
+          try {
+            if (!vid.paused) vid.pause();
+            vid.currentTime = 0;
+          } catch (err3) { /* 忽略 */ }
         }
       }
     }
@@ -1180,24 +1220,152 @@
     if (el.heroTitle) el.heroTitle.textContent = s.title || 'Kobe Bryant';
     if (el.heroSub) el.heroSub.textContent = s.sub || '';
     if (el.heroLine) el.heroLine.textContent = s.line || '';
+
+    syncHeroPlayBtn();
+    restartHeroTimer();
+  }
+
+  function syncHeroPlayBtn() {
+    if (!el.heroPlay) return;
+    var s = heroSlides()[heroIdx];
+    if (!s || s.type !== 'video') {
+      el.heroPlay.hidden = true;
+      return;
+    }
+    var v = heroVideoAt(heroIdx);
+    var playing = !!(v && !v.paused && !v.ended);
+    el.heroPlay.hidden = playing;
+    el.heroPlay.textContent = '▶';
+    el.heroPlay.setAttribute('aria-label', playing ? '暂停视频' : '播放视频');
+  }
+
+  function toggleHeroVideo() {
+    var s = heroSlides()[heroIdx];
+    if (!s || s.type !== 'video') return;
+    var v = heroVideoAt(heroIdx);
+    if (!v) return;
+    if (v.paused || v.ended) {
+      var p = v.play();
+      if (p && p.catch) p.catch(function () { syncHeroPlayBtn(); });
+    } else {
+      v.pause();
+    }
+    syncHeroPlayBtn();
+    restartHeroTimer();
   }
 
   function restartHeroTimer() {
     clearInterval(heroTimer);
+    clearTimeout(heroTimer);
+    heroTimer = null;
     if (heroSlides().length < 2) return;
-    heroTimer = setInterval(function () {
+
+    var s = heroSlides()[heroIdx];
+    var wait = Math.max(2500, Number(kobeData.hero && kobeData.hero.interval) || 5000);
+    var v = s && s.type === 'video' ? heroVideoAt(heroIdx) : null;
+
+    // 视频正在播时等它播完再切；暂停/未播时按图片节奏切
+    if (v && !v.paused && !v.ended) {
+      var dur = (isFinite(v.duration) && v.duration > 0) ? v.duration * 1000 : wait;
+      wait = Math.max(3000, dur + 700);
+    }
+
+    heroTimer = setTimeout(function () {
       if (state.screen !== 'kobe') return;
       applyHeroSlide(heroIdx + 1);
-    }, kobeData.hero.interval || 5000);
+    }, wait);
+  }
+
+  function resetHeroMediaShift() {
+    if (el.heroMedia) el.heroMedia.style.transform = '';
+    if (el.hero) el.hero.classList.remove('is-dragging');
+  }
+
+  function bindHeroGestures() {
+    if (!el.hero || !el.heroMedia) return;
+
+    el.hero.addEventListener('pointerdown', function (e) {
+      if (e.button != null && e.button !== 0) return;
+      if (e.target.closest && e.target.closest('#kobe-hero-dots, #kobe-hero-play')) return;
+      heroDragState = {
+        id: e.pointerId, x: e.clientX, y: e.clientY, dx: 0, dy: 0,
+        active: false, at: Date.now()
+      };
+    });
+
+    el.hero.addEventListener('pointermove', function (e) {
+      var d = heroDragState;
+      if (!d || e.pointerId !== d.id) return;
+      d.dx = e.clientX - d.x;
+      d.dy = e.clientY - d.y;
+      if (!d.active && Math.abs(d.dx) > 10 && Math.abs(d.dx) > Math.abs(d.dy)) {
+        d.active = true;
+        el.hero.classList.add('is-dragging');
+        try { el.hero.setPointerCapture(e.pointerId); } catch (err) { /* 忽略 */ }
+      }
+      if (!d.active) return;
+      e.preventDefault();
+      var w = el.hero.clientWidth || 600;
+      var shift = Math.max(-w * .34, Math.min(w * .34, d.dx));
+      el.heroMedia.style.transform = 'translateX(' + shift + 'px)';
+    }, { passive: false });
+
+    function endHeroDrag(e, cancelled) {
+      var d = heroDragState;
+      if (!d || e.pointerId !== d.id) return;
+      heroDragState = null;
+      resetHeroMediaShift();
+      if (!d.active) return;
+
+      heroDragBlock = true;
+      setTimeout(function () { heroDragBlock = false; }, 380);
+      if (cancelled) return;
+
+      var w = el.hero.clientWidth || 600;
+      var threshold = Math.min(90, Math.max(38, w * .12));
+      var speed = Math.abs(d.dx) / Math.max(1, Date.now() - d.at);
+      if (Math.abs(d.dx) < threshold && !(Math.abs(d.dx) > 18 && speed > .45)) return;
+      applyHeroSlide(d.dx < 0 ? heroIdx + 1 : heroIdx - 1);
+    }
+
+    el.hero.addEventListener('pointerup', function (e) { endHeroDrag(e, false); });
+    el.hero.addEventListener('pointercancel', function (e) { endHeroDrag(e, true); });
+
+    el.hero.addEventListener('click', function (e) {
+      if (e.target.closest && e.target.closest('#kobe-hero-dots')) return;
+      if (heroDragBlock) return;
+      if (e.target.closest && e.target.closest('#kobe-hero-play')) {
+        e.preventDefault();
+        toggleHeroVideo();
+        return;
+      }
+      var s = heroSlides()[heroIdx];
+      if (s && s.type === 'video') toggleHeroVideo();
+    });
   }
 
   // ---------------- 曼巴精神组图 ----------------
 
   var spiritIdx = 0;
   var spiritTimer = null;
+  var spiritDragState = null;
+  var spiritDragBlock = false;
+  var lbDragState = null;
+  var lbDragBlock = false;
 
   function spiritImages() {
     return (kobeData.spirit && kobeData.spirit.images) || [];
+  }
+
+  function restartSpiritTimer() {
+    clearInterval(spiritTimer);
+    spiritTimer = null;
+    var imgs = spiritImages();
+    if (imgs.length < 2 || state.lightboxOpen) return;
+    spiritTimer = setInterval(function () {
+      if (state.screen !== 'kobe' || state.lightboxOpen) return;
+      applySpiritSlide(spiritIdx + 1);
+    }, Math.max(3000, Number(kobeData.spirit && kobeData.spirit.interval) || 6000));
   }
 
   function renderSpirit() {
@@ -1206,7 +1374,7 @@
     if (!imgs.length) return;
 
     el.spiritTrack.innerHTML = imgs.map(function (im, i) {
-      return '<div class="spirit-slide' + (i === 0 ? ' is-on' : '') + '"><img src="' + esc(im.src) + '" alt="' + esc(im.caption || '曼巴精神') + '" loading="lazy"></div>';
+      return '<div class="spirit-slide' + (i === 0 ? ' is-on' : '') + '"><img src="' + esc(im.src) + '" alt="' + esc(im.caption || '曼巴精神') + '" loading="lazy" draggable="false"></div>';
     }).join('');
 
     if (el.spiritDots) {
@@ -1217,13 +1385,6 @@
 
     spiritIdx = 0;
     applySpiritSlide(0);
-    clearInterval(spiritTimer);
-    if (imgs.length > 1) {
-      spiritTimer = setInterval(function () {
-        if (state.screen !== 'kobe' || state.lightboxOpen) return;
-        applySpiritSlide(spiritIdx + 1);
-      }, kobeData.spirit.interval || 6000);
-    }
   }
 
   function applySpiritSlide(i) {
@@ -1235,15 +1396,29 @@
     var dots = el.spiritDots ? el.spiritDots.querySelectorAll('.spirit-dot') : [];
     for (var d = 0; d < dots.length; d++) dots[d].classList.toggle('is-on', d === spiritIdx);
     if (el.spiritCaption) el.spiritCaption.textContent = imgs[spiritIdx].caption || 'Black Mamba · 曼巴精神';
+    if (state.lightboxOpen) syncLightbox();
+    restartSpiritTimer();
+  }
+
+  function syncLightbox() {
+    var imgs = spiritImages();
+    if (!imgs.length) return;
+    var im = imgs[spiritIdx];
+    if (el.lbImg) {
+      el.lbImg.src = im.src;
+      el.lbImg.alt = im.caption || '曼巴精神';
+    }
+    if (el.lbCap) el.lbCap.textContent = im.caption || '';
+    if (el.lbCount) el.lbCount.textContent = (spiritIdx + 1) + ' / ' + imgs.length;
   }
 
   function openKobeLightbox() {
     var imgs = spiritImages();
     if (!imgs.length || !el.lightbox) return;
-    var im = imgs[spiritIdx];
     state.lightboxOpen = true;
-    el.lbImg.src = im.src;
-    el.lbCap.textContent = im.caption || '';
+    clearInterval(spiritTimer);
+    spiritTimer = null;
+    syncLightbox();
     el.lightbox.hidden = false;
     setFocus(el.lbClose, true);
   }
@@ -1253,7 +1428,117 @@
     state.lightboxOpen = false;
     el.lightbox.hidden = true;
     el.lbImg.removeAttribute('src');
+    el.lbImg.style.transform = '';
     setFocus(el.spiritCard, true);
+    restartSpiritTimer();
+  }
+
+  function stepKobeLightbox(dir) {
+    if (!state.lightboxOpen) return;
+    applySpiritSlide(spiritIdx + (dir < 0 ? -1 : 1));
+  }
+
+  function bindSpiritGestures() {
+    if (!el.spiritCard || !el.spiritTrack) return;
+
+    el.spiritTrack.addEventListener('pointerdown', function (e) {
+      if (e.button != null && e.button !== 0) return;
+      spiritDragState = {
+        id: e.pointerId, x: e.clientX, y: e.clientY, dx: 0, dy: 0,
+        active: false, at: Date.now()
+      };
+    });
+
+    el.spiritTrack.addEventListener('pointermove', function (e) {
+      var d = spiritDragState;
+      if (!d || e.pointerId !== d.id) return;
+      d.dx = e.clientX - d.x;
+      d.dy = e.clientY - d.y;
+      if (!d.active && Math.abs(d.dx) > 10 && Math.abs(d.dx) > Math.abs(d.dy)) {
+        d.active = true;
+        el.spiritCard.classList.add('is-dragging');
+        try { el.spiritTrack.setPointerCapture(e.pointerId); } catch (err) { /* 忽略 */ }
+      }
+      if (!d.active) return;
+      e.preventDefault();
+      var w = el.spiritTrack.clientWidth || 400;
+      var shift = Math.max(-w * .34, Math.min(w * .34, d.dx));
+      el.spiritTrack.style.transform = 'translateX(' + shift + 'px)';
+    }, { passive: false });
+
+    function endSpiritDrag(e, cancelled) {
+      var d = spiritDragState;
+      if (!d || e.pointerId !== d.id) return;
+      spiritDragState = null;
+      el.spiritTrack.style.transform = '';
+      el.spiritCard.classList.remove('is-dragging');
+      if (!d.active) return;
+
+      spiritDragBlock = true;
+      setTimeout(function () { spiritDragBlock = false; }, 420);
+      if (cancelled) return;
+
+      var w = el.spiritTrack.clientWidth || 400;
+      var threshold = Math.min(80, Math.max(30, w * .1));
+      var speed = Math.abs(d.dx) / Math.max(1, Date.now() - d.at);
+      if (Math.abs(d.dx) < threshold && !(Math.abs(d.dx) > 15 && speed > .45)) return;
+      applySpiritSlide(d.dx < 0 ? spiritIdx + 1 : spiritIdx - 1);
+    }
+
+    el.spiritTrack.addEventListener('pointerup', function (e) { endSpiritDrag(e, false); });
+    el.spiritTrack.addEventListener('pointercancel', function (e) { endSpiritDrag(e, true); });
+
+    // 放大图：左右拖拽 / 滑动切换
+    el.lightbox.addEventListener('pointerdown', function (e) {
+      if (e.button != null && e.button !== 0) return;
+      if (e.target.closest && e.target.closest('#kobe-lb-close, #kobe-lb-prev, #kobe-lb-next')) return;
+      lbDragState = {
+        id: e.pointerId, x: e.clientX, y: e.clientY, dx: 0, dy: 0,
+        active: false, at: Date.now()
+      };
+    });
+
+    el.lightbox.addEventListener('pointermove', function (e) {
+      var d = lbDragState;
+      if (!d || e.pointerId !== d.id) return;
+      d.dx = e.clientX - d.x;
+      d.dy = e.clientY - d.y;
+      if (!d.active && Math.abs(d.dx) > 10 && Math.abs(d.dx) > Math.abs(d.dy)) {
+        d.active = true;
+        el.lightbox.classList.add('is-dragging');
+        try { el.lightbox.setPointerCapture(e.pointerId); } catch (err2) { /* 忽略 */ }
+      }
+      if (!d.active) return;
+      e.preventDefault();
+      var shift = Math.max(-innerWidth * .3, Math.min(innerWidth * .3, d.dx));
+      el.lbImg.style.transform = 'translateX(' + shift + 'px)';
+    }, { passive: false });
+
+    function endLbDrag(e, cancelled) {
+      var d = lbDragState;
+      if (!d || e.pointerId !== d.id) return;
+      lbDragState = null;
+      el.lightbox.classList.remove('is-dragging');
+      el.lbImg.style.transform = '';
+      if (!d.active) return;
+
+      lbDragBlock = true;
+      setTimeout(function () { lbDragBlock = false; }, 420);
+      if (cancelled) return;
+
+      var threshold = Math.min(90, Math.max(34, innerWidth * .08));
+      var speed = Math.abs(d.dx) / Math.max(1, Date.now() - d.at);
+      if (Math.abs(d.dx) < threshold && !(Math.abs(d.dx) > 18 && speed > .4)) return;
+      stepKobeLightbox(d.dx < 0 ? 1 : -1);
+    }
+
+    el.lightbox.addEventListener('pointerup', function (e) { endLbDrag(e, false); });
+    el.lightbox.addEventListener('pointercancel', function (e) { endLbDrag(e, true); });
+  }
+
+  function bindKobeGestures() {
+    bindHeroGestures();
+    bindSpiritGestures();
   }
 
   /** 分页扫回放列表，挑出湖人的比赛（页数据在服务端有缓存，成本很低） */
@@ -1341,7 +1626,10 @@
     version: 0,
     hero: {
       interval: 5000,
-      slides: [{ type: 'image', src: 'assets/kobe/hero.jpg', title: 'Kobe Bryant', sub: '1978.08.23 — 2020.01.26 · 8 & 24', line: '「你见过凌晨四点的洛杉矶吗？」' }]
+      slides: [
+        { type: 'image', src: 'assets/kobe/hero.jpg', title: 'Kobe Bryant', sub: '1978.08.23 — 2020.01.26 · 8 & 24', line: '「你见过凌晨四点的洛杉矶吗？」' },
+        { type: 'video', src: 'assets/kobe/hero/kobe-moments.mp4', poster: 'assets/kobe/hero/kobe-moments.jpg', autoplay: true, title: 'Mamba Moments', sub: '生涯高光 · 24 秒', line: '每一帧，都是曼巴' }
+      ]
     },
     bgm: [
       { name: 'Because of You', src: 'assets/kobe/Because of You.mp3', local: true },
@@ -1368,6 +1656,7 @@
             type: s.type === 'video' ? 'video' : 'image',
             src: String(s.src || ''),
             poster: String(s.poster || ''),
+            autoplay: s.autoplay !== false,
             title: String(s.title || ''),
             sub: String(s.sub || ''),
             line: String(s.line || '')
@@ -2392,15 +2681,29 @@
     var target = e.target;
     if (!target || !target.closest) return;
 
-    // 图片放大预览：点背景或关闭按钮退出
-    if (state.lightboxOpen && (target === el.lightbox || target.closest('#kobe-lb-close'))) {
-      closeKobeLightbox();
+    // 图片放大预览：左右切换、点背景或关闭按钮退出
+    if (state.lightboxOpen) {
+      var lbPrev = target.closest('#kobe-lb-prev');
+      if (lbPrev) {
+        stepKobeLightbox(-1);
+        return;
+      }
+      var lbNext = target.closest('#kobe-lb-next');
+      if (lbNext) {
+        stepKobeLightbox(1);
+        return;
+      }
+      if (lbDragBlock) return;
+      if (target === el.lightbox || target.closest('#kobe-lb-close')) {
+        closeKobeLightbox();
+      }
       return;
     }
 
     // 曼巴精神组图：点图片放大
     var spiritCard = target.closest('[data-spirit-open]');
     if (spiritCard) {
+      if (spiritDragBlock) return;
       setFocus(spiritCard, true);
       openKobeLightbox();
       return;
@@ -2417,7 +2720,6 @@
     var heroDot = target.closest('[data-hero-dot]');
     if (heroDot) {
       applyHeroSlide(Number(heroDot.dataset.heroDot));
-      restartHeroTimer();
       return;
     }
 
@@ -2593,8 +2895,13 @@
 
   /** 方向键（repeat 为遥控器 / 键盘的重复事件） */
   function handleDir(dir, repeat) {
-    // 作者弹框打开时，方向键不再穿透到列表
-    if (state.modalOpen || state.lightboxOpen) return;
+    // 放大图打开时，左右键切图；作者弹框打开时，方向键不穿透
+    if (state.lightboxOpen) {
+      if (dir === 'left') stepKobeLightbox(-1);
+      else if (dir === 'right') stepKobeLightbox(1);
+      return;
+    }
+    if (state.modalOpen) return;
     if (state.playerFull) {
       // 直播是网页播放器，没有我们自己的快进逻辑
       if (state.isLive) return;
@@ -2957,6 +3264,7 @@
   initWebPlayer();
   renderBgm();
   renderSpirit();
+  bindKobeGestures();
   renderMorePanel();
   loadKobeData();
   route();

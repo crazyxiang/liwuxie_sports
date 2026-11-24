@@ -46,6 +46,9 @@ const MIME = {
   '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
   '.ico': 'image/x-icon',
+  '.mp4': 'video/mp4',
+  '.mp3': 'audio/mpeg',
+  '.m4a': 'audio/mp4',
   '.apk': 'application/vnd.android.package-archive'
 };
 
@@ -888,7 +891,7 @@ async function handleApi(req, res, url) {
   return json(res, 404, { error: '接口不存在' });
 }
 
-function serveStatic(res, pathname) {
+function serveStatic(req, res, pathname) {
   const rel = pathname === '/' ? '/index.html' : pathname;
 
   // 安装包放在项目根目录 apk_package/，不在 app/web 里（否则会被打进 APK 自身）
@@ -928,16 +931,48 @@ function serveStatic(res, pathname) {
     return;
   }
 
-  fs.readFile(file, (err, buf) => {
-    if (err) {
+  fs.stat(file, (err, st) => {
+    if (err || !st.isFile()) {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('404 Not Found');
       return;
     }
-    res.writeHead(200, {
-      'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream',
+
+    const type = MIME[path.extname(file).toLowerCase()] || 'application/octet-stream';
+    const total = st.size;
+    const range = req.headers.range || '';
+    const m = /^bytes=(\d*)-(\d*)$/.exec(range);
+
+    let start = 0;
+    let end = total - 1;
+    let code = 200;
+    if (m && total > 0) {
+      if (!m[1]) {
+        start = Math.max(0, total - Number(m[2]));
+      } else {
+        start = Number(m[1]);
+        if (m[2]) end = Math.min(Number(m[2]), total - 1);
+      }
+      if (start <= end && start < total) code = 206;
+      else {
+        res.writeHead(416, { 'Content-Range': `bytes */${total}` }).end();
+        return;
+      }
+    }
+
+    const headers = {
+      'Content-Type': type,
+      'Content-Length': end - start + 1,
+      'Accept-Ranges': 'bytes',
       'Cache-Control': 'no-store'
-    });
-    res.end(buf);
+    };
+    if (code === 206) headers['Content-Range'] = `bytes ${start}-${end}/${total}`;
+
+    res.writeHead(code, headers);
+    if (req.method === 'HEAD') {
+      res.end();
+      return;
+    }
+    fs.createReadStream(file, { start, end }).pipe(res);
   });
 }
 
@@ -946,7 +981,7 @@ const server = http.createServer((req, res) => {
   if (url.pathname.startsWith('/api/')) {
     handleApi(req, res, url);
   } else {
-    serveStatic(res, url.pathname);
+    serveStatic(req, res, url.pathname);
   }
 });
 
