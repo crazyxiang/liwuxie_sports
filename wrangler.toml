@@ -1,0 +1,11 @@
+name = "liwuxie-sports"
+main = "worker/index.js"
+compatibility_date = "2025-06-01"
+
+# 静态资源：直接把 app/web 当站点根目录
+[assets]
+directory = "./app/web"
+binding = "ASSETS"
+
+[observability]
+enabled = true
