@@ -17,3 +17,6 @@ android/local.properties
 .vscode/
 .DS_Store
 Thumbs.db
+
+# 本地笔记，含密钥，不提交
+笔记.txt
