@@ -2087,8 +2087,10 @@ body.is-web .pb-full { display: inline-flex; }
   .live-side b { font-size: 13.5px; }
   .live-logo { width: 20px; height: 20px; }
 
-  .kobe-hero { aspect-ratio: 16 / 10; border-radius: 18px; }
+  /* min-height + aspect-ratio 会把宽度反推成 384px，窄屏手机右侧被裁掉；手机端按容器宽度走 */
+  .kobe-hero { width: 100%; max-width: 100%; min-height: 0; aspect-ratio: 16 / 10; border-radius: 18px; }
   .kobe-hero-in { left: 18px; right: 18px; bottom: 18px; max-width: none; }
+  .kobe-hero-in h2 { font-size: clamp(26px, 8vw, 40px); letter-spacing: 1px; overflow-wrap: anywhere; }
   .kobe-eyebrow { font-size: 10.5px; letter-spacing: 2.5px; }
   .kobe-sub { font-size: 10.5px; }
   .kobe-hero-play { width: 46px; height: 46px; margin: -23px 0 0 -23px; font-size: 17px; }
