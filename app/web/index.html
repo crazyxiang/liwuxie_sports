@@ -28,7 +28,6 @@
   <nav class="tabs" id="nav">
     <button class="tab focusable is-active" data-nav="list">录像</button>
     <button class="tab focusable" data-nav="live">直播</button>
-    <button class="tab focusable" data-nav="rank">排名</button>
     <button class="tab focusable" data-nav="schedule">赛程</button>
     <button class="tab focusable" data-nav="kobe">科比</button>
   </nav>
@@ -124,24 +123,14 @@
     <div class="live-list" id="live-list"></div>
   </section>
 
-  <!-- 球队 / 球员排名 -->
-  <section class="screen" id="screen-rank" hidden>
-    <div class="rank-head">
-      <h2>数据排行</h2>
-      <div class="seg" id="rank-kind">
-        <button class="seg-btn focusable is-active" data-kind="team">球队数据</button>
-        <button class="seg-btn focusable" data-kind="player">球员数据</button>
-      </div>
-    </div>
-    <div class="chips" id="rank-group"></div>
-    <div id="rank-body"></div>
-  </section>
-
-  <!-- 赛程 -->
+  <!-- 赛程 / 排名（同一页两个选项卡） -->
   <section class="screen" id="screen-schedule" hidden>
     <div class="rank-head">
-      <h2>NBA 赛程</h2>
-      <div class="sch-bar">
+      <div class="seg" id="sch-tabs">
+        <button class="seg-btn focusable is-active" data-sch="schedule">NBA 赛程</button>
+        <button class="seg-btn focusable" data-sch="rank">排名</button>
+      </div>
+      <div class="sch-bar" id="sch-bar">
         <button class="btn focusable" id="sch-prev">前一天</button>
         <input type="date" id="sch-date" class="date-input focusable" tabindex="-1">
         <button class="btn focusable" id="sch-today">今天</button>
@@ -149,6 +138,19 @@
       </div>
     </div>
     <div id="sch-body"></div>
+
+    <!-- 球队 / 球员排名 -->
+    <div id="screen-rank" hidden>
+      <div class="rank-head">
+        <h2>数据排行</h2>
+        <div class="seg" id="rank-kind">
+          <button class="seg-btn focusable is-active" data-kind="team">球队数据</button>
+          <button class="seg-btn focusable" data-kind="player">球员数据</button>
+        </div>
+      </div>
+      <div class="chips" id="rank-group"></div>
+      <div id="rank-body"></div>
+    </div>
   </section>
 
   <!-- 科比专栏 -->

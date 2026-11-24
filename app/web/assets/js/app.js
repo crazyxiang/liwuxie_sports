@@ -53,14 +53,18 @@
     rankGroup: 0,
     rank: { team: null, player: null },
     rankLoading: false,
-    // 赛程
+    // 赛程 / 排名（同一页两个选项卡，默认 NBA 赛程）
     date: todayStr(),
+    schTab: 'schedule',
     schLoading: false,
     schLoaded: false,
     // 播放页
     detail: null,
     detailId: '',
     backHash: '#/',
+    // 从播放页返回时恢复列表 / 科比页原来的滚动位置
+    listY: null,
+    kobeY: null,
     hls: null,
     playerFull: false,
     // 直播网页播放
@@ -106,6 +110,8 @@
     rankBody: document.getElementById('rank-body'),
 
     schScreen: document.getElementById('screen-schedule'),
+    schTabs: document.getElementById('sch-tabs'),
+    schBar: document.getElementById('sch-bar'),
     schDate: document.getElementById('sch-date'),
     schBody: document.getElementById('sch-body'),
 
@@ -213,7 +219,6 @@
   var SCREENS = {
     list: function () { return el.listScreen; },
     live: function () { return el.liveScreen; },
-    rank: function () { return el.rankScreen; },
     schedule: function () { return el.schScreen; },
     kobe: function () { return el.kobeScreen; },
     replay: function () { return el.replayScreen; }
@@ -246,7 +251,9 @@
   /** 滚动时为吸顶的顶栏留出空间，避免焦点元素被挡住 */
   function ensureVisible(node) {
     var r = node.getBoundingClientRect();
-    var top = topbarBottom() + 12;
+    var barBottom = topbarBottom();
+    // 顶栏滚出屏幕时 rect 会是负数，夹到 0，否则会把「安全区」算到页面外
+    var top = (barBottom > 0 ? barBottom : 0) + 12;
     var bottom = window.innerHeight - 16;
     if (r.height > bottom - top) {
       window.scrollBy(0, r.top - top);
@@ -283,12 +290,12 @@
     return dir === 'down' ? window.pageYOffset < max - 4 : window.pageYOffset > 4;
   }
 
-  function scrollStep(dir) {
+  function scrollStep(dir, ratioOverride) {
     var view = Math.max(window.innerHeight - topbarBottom(), 240);
     // 排名 / 科比是长列表，滚动步长再小一点，方便一行行慢慢看
-    var ratio = state.screen === 'rank' || state.screen === 'kobe'
+    var ratio = ratioOverride || (state.screen === 'kobe' || (state.screen === 'schedule' && state.schTab === 'rank')
       ? 0.28
-      : state.screen === 'schedule' ? 0.42 : 0.82;
+      : state.screen === 'schedule' ? 0.42 : 0.82);
     window.scrollBy(0, (dir === 'down' ? 1 : -1) * Math.round(view * ratio));
   }
 
@@ -386,6 +393,67 @@
     return best;
   }
 
+  /** 把内容区焦点按「视觉行」分组：上下移动时一行一行走，绝不跳行、漏模块 */
+  function contentRows() {
+    var nodes = contentFocusables();
+    if (!nodes.length) return [];
+
+    var rects = nodes.map(function (node) {
+      return { node: node, r: node.getBoundingClientRect() };
+    });
+    rects.sort(function (a, b) {
+      if (Math.abs(a.r.top - b.r.top) > 6) return a.r.top - b.r.top;
+      return a.r.left - b.r.left;
+    });
+
+    var rows = [];
+    for (var i = 0; i < rects.length; i++) {
+      var it = rects[i];
+      var last = rows[rows.length - 1];
+      if (last && Math.abs(last.top - it.r.top) <= 12) {
+        last.items.push(it);
+      } else {
+        rows.push({ top: it.r.top, items: [it] });
+      }
+    }
+    rows.forEach(function (row) {
+      row.items.sort(function (a, b) { return a.r.left - b.r.left; });
+    });
+    return rows;
+  }
+
+  /** 上下移动：找当前元素所在的相邻一行，取横向最接近的那个 */
+  function rowTarget(cur, dir) {
+    var rows = contentRows();
+    var ri = -1;
+    for (var i = 0; i < rows.length && ri < 0; i++) {
+      for (var j = 0; j < rows[i].items.length; j++) {
+        if (rows[i].items[j].node === cur) { ri = i; break; }
+      }
+    }
+    if (ri < 0) return null;
+
+    var row = rows[ri + (dir === 'down' ? 1 : -1)];
+    if (!row) return null;
+
+    var base = cur.getBoundingClientRect();
+    var cx = base.left + base.width / 2;
+    var best = null;
+    var bestScore = Infinity;
+    for (var k = 0; k < row.items.length; k++) {
+      var it = row.items[k];
+      var rx = it.r.left + it.r.width / 2;
+      // 横向距离为主；和当前元素有横向重叠的更优先，避免斜着跳
+      var overlap = Math.min(it.r.right, base.right) - Math.max(it.r.left, base.left);
+      var score = Math.abs(rx - cx) + (overlap > 0 ? 0 : 120);
+      if (score < bestScore) {
+        bestScore = score;
+        best = it.node;
+      }
+    }
+    return best;
+  }
+
   function move(dir) {
     var cur = currentFocus();
 
@@ -426,33 +494,29 @@
       return;
     }
 
-    // 排名页：从「球队数据 / 球员数据」按下键，落到分组栏的第一个选项
-    if (dir === 'down' && cur.classList.contains('seg-btn')) {
-      var firstChip = el.rankGroupBox.querySelector('.chip-btn');
-      if (firstChip) {
+    // 排名选项卡：从「球队数据 / 球员数据」按下键，落到分组栏的第一个选项
+    if (dir === 'down' && cur.classList.contains('seg-btn') && cur.closest('#rank-kind')) {
+      var firstChip = el.rankGroupBox ? el.rankGroupBox.querySelector('.chip-btn') : null;
+      if (firstChip && firstChip.offsetParent) {
         setFocus(firstChip);
         return;
       }
     }
 
-    var best = pickInDirection(contentFocusables(), cur, dir);
-
-    // 科比页文字很长：往下按时目标还在屏幕外就先滚屏，不要直接跳到最下面的视频
-    if (best && dir === 'down' && state.screen === 'kobe') {
-      if (best.getBoundingClientRect().top > window.innerHeight - 60 && canScroll('down')) {
-        scrollStep('down');
+    // 上下移动按视觉行一行一行走，保证每个模块都会被经过、画面跟着动
+    if (dir === 'down' || dir === 'up') {
+      var target = rowTarget(cur, dir);
+      if (target) {
+        var tr = target.getBoundingClientRect();
+        // 中间隔了大段没有焦点的图文：先滚屏让用户能看到，再落焦点，避免一按就跳过整块内容
+        var gap = dir === 'down' ? tr.top - window.innerHeight : -tr.bottom;
+        if (gap > window.innerHeight * 0.9 && canScroll(dir)) {
+          scrollStep(dir, 0.55);
+          return;
+        }
+        setFocus(target);
         return;
       }
-    }
-
-    if (best) {
-      // 直接聚焦目标（ensureVisible 会滚动到视野内），上下左右都能即时响应
-      setFocus(best);
-      followFocus(best);
-      return;
-    }
-
-    if (dir === 'down' || dir === 'up') {
       if (canScroll(dir)) {
         scrollStep(dir);
         return;
@@ -462,6 +526,14 @@
         var active = el.nav.querySelector('.tab.is-active') || el.nav.querySelector('.tab');
         if (active) setFocus(active);
       }
+      return;
+    }
+
+    var best = pickInDirection(contentFocusables(), cur, dir);
+    if (best) {
+      // 左右移动仍然按几何最近：同一行里换格 / 行末换行
+      setFocus(best);
+      followFocus(best);
     }
   }
 
@@ -743,6 +815,22 @@
 
   // ---------------- 赛程 ----------------
 
+  /** 赛程页的两个选项卡：NBA 赛程 / 排名（默认赛程） */
+  function applySchTab(tab) {
+    state.schTab = tab === 'rank' ? 'rank' : 'schedule';
+    var isRank = state.schTab === 'rank';
+
+    if (el.schTabs) {
+      var btns = el.schTabs.querySelectorAll('.seg-btn');
+      for (var i = 0; i < btns.length; i++) {
+        btns[i].classList.toggle('is-active', (btns[i].dataset.sch || '') === state.schTab);
+      }
+    }
+    if (el.schBar) el.schBar.hidden = isRank;
+    if (el.schBody) el.schBody.hidden = isRank;
+    if (el.rankScreen) el.rankScreen.hidden = !isRank;
+  }
+
   function loadSchedule(date, force) {
     state.date = date;
     el.schDate.value = date;
@@ -912,6 +1000,7 @@
   function openLive(url, title) {
     if (!url) return;
 
+    setPlayHash('#/live/playing');
     state.backHash = '#/live';
     state.screen = 'replay';
     state.isLive = true;
@@ -1099,10 +1188,8 @@
     {
       tag: '81 分之夜 · 2006',
       items: [
-        { id: 'BV1hP4y1W7bM', title: '科比 81 分屠龙全记录（完整）', dur: '34:07' },
         { id: 'BV1zLNy6BE3T', title: '一战封神：重温 81 分屠龙神迹', dur: '27:51' },
         { id: 'BV1scEK6rEmE', title: '半场 55 分、全场 81 分的统治级表演', dur: '5:22' },
-        { id: 'BV1qT421D7iS', title: '重温经典：81 分屠龙之夜', dur: '2:00' },
         { id: 'BV1QhKCzkEbZ', title: '2006 年的 8 号科比到底有多强', dur: '1:14' }
       ]
     },
@@ -1217,6 +1304,8 @@
   /** 在本页播放器里直接打开 B 站视频（视频流由本机服务转发，不跳外链） */
   function openKobeVideo(bv, title) {
     clearKobeEmbed();
+    if (state.screen === 'kobe') state.kobeY = window.pageYOffset;
+    setPlayHash('#/play/' + bv);
     state.backHash = '#/kobe';
     state.screen = 'replay';
     state.detailId = 'kobe-' + bv;
@@ -1642,10 +1731,22 @@
     showPlayerTip('接着上次 ' + fmtTime(t) + ' 继续播放', 2600);
   }
 
+  /** 播放页也进历史记录：网页/手机浏览器返回键能直接回到进入前的页面 */
+  function setPlayHash(hash) {
+    if ((location.hash || '') === hash) return;
+    skipNextHashRoute = true;
+    location.hash = hash;
+  }
+
   function showReplay(id) {
+    var entering = state.screen !== 'replay';
     state.backHash = state.screen === 'kobe'
       ? '#/kobe'
       : state.screen === 'replay' ? state.backHash : '#/';
+    if (entering && state.screen === 'list') state.listY = window.pageYOffset;
+    if (entering && location.hash.indexOf('#/replay/') !== 0) {
+      setPlayHash('#/replay/' + encodeURIComponent(id));
+    }
     state.screen = 'replay';
     state.detailId = id;
     stopLive();
@@ -1724,10 +1825,11 @@
     state.screen = name;
     el.listScreen.hidden = name !== 'list';
     el.liveScreen.hidden = name !== 'live';
-    el.rankScreen.hidden = name !== 'rank';
+    el.rankScreen.hidden = true;
     el.schScreen.hidden = name !== 'schedule';
     el.kobeScreen.hidden = name !== 'kobe';
     el.replayScreen.hidden = true;
+    if (name === 'schedule') applySchTab(state.schTab);
     syncNav(name);
     window.scrollTo(0, 0);
 
@@ -1793,13 +1895,15 @@
       state.items = [];
       state.noCacheAll = true;
       loadNext(true, true);
-    } else if (state.screen === 'rank') {
-      state.rank[state.rankKind] = null;
-      loadRank(true);
     } else if (state.screen === 'live') {
       loadLives(true);
     } else if (state.screen === 'schedule') {
-      loadSchedule(state.date, true);
+      if (state.schTab === 'rank') {
+        state.rank[state.rankKind] = null;
+        loadRank(true);
+      } else {
+        loadSchedule(state.date, true);
+      }
     } else if (state.screen === 'kobe') {
       loadKobe(true);
     } else if (state.screen === 'replay') {
@@ -1848,6 +1952,18 @@
       return;
     }
 
+    // 直播播放中：刷新 / 前进回到这个地址时，能重开刚才那场
+    if (hash === '#/live/playing') {
+      if (state.screen === 'replay' && state.isLive) return;
+      if (state.liveSource) {
+        openLive(state.liveSource, state.liveTitle);
+      } else {
+        showScreen('live');
+        loadLives();
+      }
+      return;
+    }
+
     if (hash === '#/live') {
       showScreen('live');
       loadLives();
@@ -1855,12 +1971,16 @@
     }
 
     if (hash === '#/rank') {
-      showScreen('rank');
+      // 排名已经并到赛程页，老链接也落到「排名」选项卡
+      state.schTab = 'rank';
+      showScreen('schedule');
       loadRank();
       return;
     }
 
     if (hash === '#/schedule') {
+      // 从菜单进赛程页，默认回到 NBA 赛程
+      state.schTab = 'schedule';
       showScreen('schedule');
       if (!state.schLoaded) loadSchedule(state.date);
       return;
@@ -1869,6 +1989,11 @@
     if (hash === '#/kobe') {
       showScreen('kobe');
       loadKobe();
+      if (state.kobeY != null) {
+        var ky = state.kobeY;
+        state.kobeY = null;
+        setTimeout(function () { try { window.scrollTo(0, ky); } catch (err) { /* 忽略 */ } }, 0);
+      }
       return;
     }
 
@@ -1877,6 +2002,11 @@
     var listTab = el.nav.querySelector('.tab.is-active');
     if (listTab) setFocus(listTab, true);
     if (!state.page) loadNext();
+    if (state.listY != null) {
+      var ly = state.listY;
+      state.listY = null;
+      setTimeout(function () { try { window.scrollTo(0, ly); } catch (err) { /* 忽略 */ } }, 0);
+    }
   }
 
   // ---------------- 原生壳判断 ----------------
@@ -2089,7 +2219,18 @@
       return;
     }
 
-    var kindBtn = target.closest('.seg-btn');
+    var schTabBtn = target.closest('.seg-btn[data-sch]');
+    if (schTabBtn) {
+      setFocus(schTabBtn);
+      var tab = schTabBtn.dataset.sch === 'rank' ? 'rank' : 'schedule';
+      applySchTab(tab);
+      if (tab === 'rank') loadRank();
+      else if (!state.schLoaded) loadSchedule(state.date);
+      window.scrollTo(0, 0);
+      return;
+    }
+
+    var kindBtn = target.closest('.seg-btn[data-kind]');
     if (kindBtn) {
       setFocus(kindBtn);
       switchRankKind(kindBtn.dataset.kind);
@@ -2259,6 +2400,17 @@
     }
     // 刚退出全屏时忽略连发的返回键，避免一下子退出页面
     if (Date.now() - lastExitFullAt < 450) return;
+    // 电视习惯：内容区按返回先把焦点收回当前菜单，再按一下才退出页面
+    if (state.screen !== 'replay') {
+      var cur = currentFocus();
+      if (cur && !isTopbarNode(cur)) {
+        var activeTab = el.nav.querySelector('.tab.is-active') || el.nav.querySelector('.tab');
+        if (activeTab) {
+          setFocus(activeTab, true);
+          return;
+        }
+      }
+    }
     if (state.screen === 'replay') {
       var back = state.backHash || '#/';
       // 直播播放页没有改 hash，直接重路由回直播列表
@@ -2374,7 +2526,7 @@
   });
 
   window.addEventListener('hashchange', function () {
-    // go() 里已经同步切过页，这里跳过重复渲染
+    // go() / 切播放页地址时已经同步处理过，这里跳过重复渲染
     if (skipNextHashRoute) {
       skipNextHashRoute = false;
       return;
