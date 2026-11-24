@@ -489,6 +489,46 @@ async function handleHls(url, requestUrl, env) {
 
 const BILI_API = 'https://api.bilibili.com';
 const BILI_REF = 'https://www.bilibili.com/';
+const BILI_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+  '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+// B 站对机房 IP 有风控（返 412），带上像浏览器的 Cookie 能大幅降低被拦概率
+const BILI_COOKIE = (function () {
+  var id;
+  try {
+    id = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now()).replace(/-/g, '');
+  } catch (err) {
+    id = '0123456789abcdef' + Date.now();
+  }
+  return 'buvid3=' + id + 'infoc; b_nut=' + Math.floor(Date.now() / 1000);
+})();
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// 同时最多打 2 个 B 站接口，避免 34 张封面一起冲上去直接被风控
+let biliActive = 0;
+const biliWait = [];
+
+function biliSlot() {
+  return new Promise((resolve) => {
+    if (biliActive < 2) {
+      biliActive += 1;
+      resolve();
+    } else {
+      biliWait.push(resolve);
+    }
+  });
+}
+
+function biliRelease() {
+  biliActive -= 1;
+  const next = biliWait.shift();
+  if (next) {
+    biliActive += 1;
+    next();
+  }
+}
 
 /** BV 号 12 位，av 号纯数字 */
 function isBiliId(id) {
@@ -504,31 +544,74 @@ function memGet(key, ttl) {
 }
 
 function memSet(key, data) {
-  if (biliMem.size > 60) biliMem.clear();
+  if (biliMem.size > 80) biliMem.clear();
   biliMem.set(key, { at: Date.now(), data });
 }
 
+/** 带浏览器指纹的 B 站 API 请求，412/403/429 退避重试 3 次 */
 async function biliGet(pathname) {
-  const r = await fetch(BILI_API + pathname, {
-    headers: { 'User-Agent': UA, Referer: BILI_REF }
-  });
-  if (!r.ok) throw new Error('bilibili HTTP ' + r.status);
-  const data = await r.json();
-  if (data.code !== 0) throw new Error(data.message || 'bilibili code ' + data.code);
-  return data.data;
+  const headers = {
+    'User-Agent': BILI_UA,
+    Referer: BILI_REF,
+    Origin: 'https://www.bilibili.com',
+    Accept: 'application/json, text/plain, */*',
+    'Accept-Language': 'zh-CN,zh;q=0.9',
+    Cookie: BILI_COOKIE
+  };
+
+  let lastStatus = 0;
+  for (let i = 0; i < 3; i++) {
+    await biliSlot();
+    let r;
+    try {
+      r = await fetch(BILI_API + pathname, { headers });
+    } finally {
+      biliRelease();
+    }
+    if (r.status === 200) {
+      const data = await r.json();
+      if (data.code !== 0) throw new Error(data.message || 'bilibili code ' + data.code);
+      return data.data;
+    }
+    lastStatus = r.status;
+    if (r.status === 412 || r.status === 403 || r.status === 429) {
+      await sleep(400 * (i + 1));
+      continue;
+    }
+    break;
+  }
+  throw new Error('bilibili HTTP ' + lastStatus);
 }
 
-/** 稿件基础信息（标题 / 时长 / 封面） */
+/** 稿件基础信息（标题 / 时长 / 封面）：内存 → Cache API → 上游，逐级兜底 */
 async function biliView(id) {
   const key = 'view:' + id;
   const hit = memGet(key, 6 * 3600 * 1000);
   if (hit) return hit;
 
-  const view = await biliGet(
-    id.startsWith('av')
-      ? `/x/web-interface/view?aid=${id.slice(2)}`
-      : `/x/web-interface/view?bvid=${id}`
-  );
+  const req = new Request('https://bili-cache.local/view/' + id);
+  let view = null;
+
+  try {
+    const res = await cachedJson(
+      req,
+      6 * 3600,
+      () =>
+        biliGet(
+          id.startsWith('av')
+            ? `/x/web-interface/view?aid=${id.slice(2)}`
+            : `/x/web-interface/view?bvid=${id}`
+        ),
+      {}
+    );
+    const parsed = await res.json();
+    if (parsed && !parsed.error) view = parsed;
+  } catch (err) {
+    view = null;
+  }
+
+  if (!view) throw new Error('视频信息暂不可用');
+
   memSet(key, view);
   return view;
 }
@@ -580,13 +663,39 @@ async function handleBiliVideo(request, url) {
   return new Response(up.body, { status: up.status, headers: out });
 }
 
+/** 接口被风控时，退一步从视频页 HTML 里抠 og:image 当封面 */
+async function biliCoverFromPage(id) {
+  const res = await fetch('https://www.bilibili.com/video/' + id + '/', {
+    headers: {
+      'User-Agent': BILI_UA,
+      Referer: BILI_REF,
+      'Accept-Language': 'zh-CN,zh;q=0.9',
+      Accept: 'text/html,application/xhtml+xml'
+    }
+  });
+  if (!res.ok) throw new Error('page HTTP ' + res.status);
+  const html = await res.text();
+  const m =
+    html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) ||
+    html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
+  if (!m) throw new Error('没有封面');
+  return m[1].replace(/^http:/, 'https:');
+}
+
 /** 封面转发：B 站图片带防盗链，加 Referer 才取得到 */
 async function handleBiliCover(url) {
   const id = url.searchParams.get('bv') || '';
   if (!isBiliId(id)) return json({ error: 'bv 不合法' }, 400);
 
-  const view = await biliView(id);
-  const pic = String(view.pic || '');
+  let pic = '';
+  try {
+    const view = await biliView(id);
+    pic = String(view.pic || '');
+  } catch (err) {
+    // 接口 412（机房 IP 风控）时走页面兜底，封面别跟着一起挂
+    pic = await biliCoverFromPage(id);
+  }
+
   let p;
   try {
     p = new URL(pic);
@@ -598,16 +707,35 @@ async function handleBiliCover(url) {
 
   // B 站封面常给 http，统一走 https 取
   const picUrl = 'https://' + p.hostname + p.pathname + p.search;
-  const up = await fetch(picUrl, { headers: { 'User-Agent': UA, Referer: BILI_REF } });
-  if (!up.ok) return json({ error: '封面不可用' }, 404);
 
-  return new Response(up.body, {
+  // 封面本身也是「一张图一个请求」，缓存住能直接消掉 90% 的上游请求
+  const cacheKey = new Request('https://bili-cache.local/cover/' + encodeURIComponent(picUrl));
+  if (CACHE) {
+    const hit = await CACHE.match(cacheKey);
+    if (hit) return hit;
+  }
+
+  const up = await fetch(picUrl, {
+    headers: { 'User-Agent': BILI_UA, Referer: BILI_REF, Cookie: BILI_COOKIE }
+  });
+  if (!up.ok) return json({ error: '封面不可用', detail: 'HTTP ' + up.status }, 404);
+
+  const res = new Response(up.body, {
     headers: {
       ...CORS,
       'Content-Type': up.headers.get('content-type') || 'image/jpeg',
-      'Cache-Control': 'public, max-age=3600'
+      'Cache-Control': 'public, max-age=86400'
     }
   });
+
+  if (CACHE) {
+    const copy = res.clone();
+    const put = CACHE.put(cacheKey, copy).catch(() => null);
+    // 边缘环境没有 waitUntil 时直接等它写完
+    await put;
+  }
+
+  return res;
 }
 
 // ---------------- 路由 ----------------

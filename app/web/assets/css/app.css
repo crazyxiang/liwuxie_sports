@@ -22,7 +22,14 @@ html, body {
   color: var(--text);
   font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
+  /* 手机上任何页面都按设备宽度排版，不出现整页横向滚动 */
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
 }
+
+img, video, svg, table { max-width: 100%; }
 
 body {
   padding-bottom: 56px;
@@ -701,6 +708,13 @@ body {
   display: none;
 }
 
+/* 兜底内嵌 B 站播放器时，同样让原生播放器和进度条让位 */
+.player-wrap.is-embed #player,
+.player-wrap.is-embed #player-state,
+.player-wrap.is-embed .player-bar {
+  display: none;
+}
+
 /* 放大播放：铺满整屏 */
 .player-wrap.is-full {
   position: fixed;
@@ -785,6 +799,46 @@ body.player-full .glow { display: none; }
   background: var(--accent);
   border-radius: 999px;
 }
+
+/* 右下角全屏按钮：只在网页端显示（body.is-web），APK 内保持原样 */
+.pb-full {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  margin-left: 4px;
+  border: 0;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.pb-full svg { width: 18px; height: 18px; }
+
+.pb-full:hover { background: rgba(255, 255, 255, 0.28); }
+
+/* 网页端：鼠标移上去就露进度条，并且进度条可点可拖 */
+body.is-web .player-wrap:hover .player-bar,
+body.is-web .player-bar.show {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+body.is-web .pb-track {
+  height: 6px;
+  cursor: pointer;
+  touch-action: none;
+}
+
+body.is-web .pb-full { display: inline-flex; }
+
+.player-wrap.is-full .pb-full { width: 44px; height: 44px; }
+.player-wrap.is-full .pb-full svg { width: 22px; height: 22px; }
 
 /* 电视全屏时进度条和时间放大，坐远了也看得清 */
 .player-wrap.is-full .player-bar { padding: 64px 56px 30px; gap: 20px; }
@@ -1455,6 +1509,153 @@ body.player-full .glow { display: none; }
   .kobe-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
+/* ---------------- 科比经典视频 ---------------- */
+
+.kobe-classics { margin: 4px 0 30px; }
+
+.kc-head {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.kc-head h3 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: 3px;
+}
+
+.kc-tip {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.kc-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: .5px;
+}
+
+.kc-group { margin: 0 0 20px; }
+
+.kc-group h4 {
+  margin: 0 0 10px;
+  font-size: 13.5px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: var(--accent-soft);
+}
+
+.kc-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.kv-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, .08);
+  background: #0e131b;
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+}
+
+.kv-card.focused,
+.kv-card:hover {
+  border-color: transparent;
+  box-shadow: 0 0 0 3px rgba(255, 106, 43, .55), 0 16px 34px rgba(0, 0, 0, .45);
+}
+
+.kv-card img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: #0b0f16;
+}
+
+/* 封面拉取失败时的占位块，避免卡片出现破图 */
+.kv-thumb-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: linear-gradient(135deg, #2a1a12, #10151f 72%);
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 12px;
+  letter-spacing: 1.5px;
+}
+
+.kv-card .kv-dur {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, .74);
+  font-size: 11.5px;
+  color: #ffe3cd;
+}
+
+.kv-card .kv-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 46px;
+  height: 46px;
+  margin: -34px 0 0 -23px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(255, 106, 43, .88);
+  color: #2a1206;
+  font-size: 20px;
+  font-weight: 900;
+  opacity: 0;
+  transform: scale(.9);
+}
+
+.kv-card.focused .kv-play,
+.kv-card:hover .kv-play {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.kv-card .kv-body {
+  padding: 9px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.kv-card .kv-title {
+  font-size: 13px;
+  line-height: 1.45;
+  font-weight: 700;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+@media (max-width: 900px) {
+  .kc-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .kc-head h3 { font-size: 17px; letter-spacing: 2px; }
+  .kv-card .kv-title { font-size: 12px; }
+  .kv-card .kv-play { display: none; }
+}
+
 /* ---------------- 手机适配 ---------------- */
 
 @media (max-width: 900px) {
@@ -1544,6 +1745,19 @@ body.player-full .glow { display: none; }
 
   .kobe-quotes { grid-template-columns: 1fr; gap: 10px; }
   .kobe-quotes blockquote { padding: 16px 16px 16px 40px; font-size: 13px; }
+
+  /* 生涯数据表：手机上压成 100% 宽，不再横向滚动 */
+  .kobe-table { overflow-x: hidden; }
+  .kobe-table table { min-width: 0; width: 100%; font-size: 11.5px; table-layout: fixed; }
+  .kobe-table th, .kobe-table td { padding: 9px 3px; text-align: center; white-space: normal; }
+  .kobe-table td:first-child { padding-left: 8px; text-align: left; }
+
+  /* 顶栏各项在窄屏可换行，避免把页面撑宽 */
+  .topbar-side { flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-left: 0; }
+  .refresh, .author, .dl-entry { padding: 7px 14px; font-size: 12.5px; }
+
+  .kobe-classics { margin-top: 0; }
+  .kc-head { flex-wrap: wrap; gap: 6px; }
 }
 
 /* ---------------- 作者 / 微信弹框 ---------------- */
@@ -1631,6 +1845,75 @@ body.player-full .glow { display: none; }
   .modal-card img { width: 230px; height: 230px; }
 }
 
+/* ---------------- 下载安装包 ---------------- */
+
+/* 顶部入口按钮：只在网页里出现 */
+.dl-entry {
+  border-color: rgba(255, 106, 43, 0.5);
+  color: #ffc9a8;
+}
+
+/* App（WebView 原生壳）里一律隐藏 */
+body.is-app .dl-entry {
+  display: none !important;
+}
+
+.dl-card {
+  width: min(520px, 88vw);
+  align-items: stretch;
+}
+
+.dl-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 14px 18px 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  text-decoration: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dl-item:hover,
+.dl-item.focused {
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: #2a1206;
+}
+
+.dl-item strong {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+
+.dl-item span {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.dl-item em {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  font-size: 12px;
+  font-style: normal;
+  color: var(--muted);
+}
+
+.dl-item.focused span,
+.dl-item.focused em,
+.dl-item:hover span,
+.dl-item:hover em {
+  color: rgba(42, 18, 6, 0.78);
+}
+
 /* ---------------- 电视端：焦点反馈立刻出现，不做过渡动画 ---------------- */
 
 .focusable,
@@ -1639,3 +1922,67 @@ body.player-full .glow { display: none; }
 .focused * {
   transition: none !important;
 }
+
+/* ---------------- 手机端顶栏：品牌与右侧按钮同一行 ---------------- */
+
+@media (max-width: 900px) {
+  /* 品牌区和右侧按钮挤在同一行，导航仍单独占一行 */
+  .topbar {
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 8px;
+    padding: 12px var(--pad-x) 10px;
+  }
+
+  .brand {
+    flex: 1 1 auto;
+    min-width: 0;
+    gap: 10px;
+  }
+
+  .brand-text h1 {
+    font-size: 18px;
+    letter-spacing: 1px;
+    white-space: nowrap;
+  }
+
+  .brand-text p {
+    margin-top: 2px;
+    font-size: 10.5px;
+    letter-spacing: 0.6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .ball { width: 30px; height: 30px; }
+
+  .topbar-side {
+    margin-left: auto;
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    gap: 7px;
+  }
+
+  .refresh,
+  .author,
+  .dl-entry {
+    padding: 6px 11px;
+    font-size: 12px;
+    letter-spacing: 0;
+    white-space: nowrap;
+  }
+
+  /* 导航第二行，占满整行 */
+  .tabs { order: 3; width: 100%; }
+}
+
+@media (max-width: 400px) {
+ 
+  .ball { width: 26px; height: 26px; }
+  .brand-text h1 { font-size: 16px; }
+  .topbar-side { gap: 5px; }
+  .refresh, .author, .dl-entry { padding: 5px 9px; font-size: 11.5px; }
+}
+

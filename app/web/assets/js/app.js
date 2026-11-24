@@ -73,7 +73,9 @@
     // 直播（默认选中 NBA）
     live: { loaded: false, loading: false, filter: 'NBA', items: [] },
     // 作者微信弹框
-    modalOpen: false
+    modalOpen: false,
+    // 当前打开的是哪个弹框：'author' | 'download'
+    modalKind: ''
   };
 
   // 由方向键切菜单时，标记「焦点留在菜单上」
@@ -132,12 +134,22 @@
     pbCur: document.getElementById('pb-cur'),
     pbTotal: document.getElementById('pb-total'),
     pbFill: document.getElementById('pb-fill'),
+    pbTrack: document.getElementById('pb-track'),
+    pbFull: document.getElementById('pb-full'),
     video: document.getElementById('player'),
     playerState: document.getElementById('player-state'),
 
     authorBtn: document.querySelector('.author'),
     authorModal: document.getElementById('author-modal'),
-    authorClose: document.getElementById('author-close')
+    authorClose: document.getElementById('author-close'),
+
+    // 下载安装包（仅网页显示）
+    dlEntry: document.getElementById('dl-entry'),
+    dlModal: document.getElementById('download-modal'),
+
+    // 科比经典视频
+    classics: document.getElementById('kobe-classics'),
+    kcCount: document.getElementById('kc-count')
   };
 
   // ---------------- 工具 ----------------
@@ -830,8 +842,8 @@
 
     if (!items.length) {
       el.liveList.innerHTML =
-        '<div class="notice"><strong>暂无' + esc(state.live.filter || '篮球') + '直播</strong>' +
-        '<span>可以切到「全部」看看其他篮球赛事</span></div>';
+        '<div class="notice"><strong>今日暂无' + esc(state.live.filter || 'NBA') + '直播</strong>' +
+        '<span>可明天再看，也可以切到「全部」看看其他篮球赛事</span></div>';
       return;
     }
 
@@ -958,6 +970,31 @@
     el.playerWrap.classList.remove('is-live');
   }
 
+  /** B 站官方播放器内嵌：本机转发失败时的兜底，仍然在本页播放，不跳外链 */
+  function playKobeEmbed(bv) {
+    clearKobeEmbed();
+    el.video.pause();
+    el.video.removeAttribute('src');
+    el.playerState.hidden = true;
+
+    var f = document.createElement('iframe');
+    f.id = 'kobe-embed-frame';
+    f.className = 'live-frame';
+    f.setAttribute('allowfullscreen', 'true');
+    f.setAttribute('scrolling', 'no');
+    f.setAttribute('allow', 'autoplay; fullscreen; encrypted-media');
+    f.src = 'https://player.bilibili.com/player.html?bvid=' + bv + '&autoplay=1&high_quality=1&danmaku=0';
+    el.playerWrap.insertBefore(f, el.video.nextSibling);
+    el.playerWrap.classList.add('is-embed');
+    showPlayerTip('本机转发没成功，已切到 B 站播放器', 2600);
+  }
+
+  function clearKobeEmbed() {
+    var old = document.getElementById('kobe-embed-frame');
+    if (old && old.parentNode) old.parentNode.removeChild(old);
+    if (el.playerWrap) el.playerWrap.classList.remove('is-embed');
+  }
+
   // ---------------- 科比专栏 ----------------
 
   /** 分页扫回放列表，挑出湖人的比赛（页数据在服务端有缓存，成本很低） */
@@ -1036,12 +1073,200 @@
     el.kobeVideos.innerHTML = items.map(cardHtml).join('');
   }
 
+  // ---------------- 科比经典视频（B 站片源，经本机服务转发） ----------------
+
+  var KOBE_CLASSICS = [
+    {
+      tag: '81 分之夜 · 2006',
+      items: [
+        { id: 'BV1hP4y1W7bM', title: '科比 81 分屠龙全记录（完整）', dur: '34:07' },
+        { id: 'BV1zLNy6BE3T', title: '一战封神：重温 81 分屠龙神迹', dur: '27:51' },
+        { id: 'BV1scEK6rEmE', title: '半场 55 分、全场 81 分的统治级表演', dur: '5:22' },
+        { id: 'BV1qT421D7iS', title: '重温经典：81 分屠龙之夜', dur: '2:00' },
+        { id: 'BV1QhKCzkEbZ', title: '2006 年的 8 号科比到底有多强', dur: '1:14' }
+      ]
+    },
+    {
+      tag: '总决赛 · 完整回顾',
+      items: [
+        { id: 'BV13hMM6YEPA', title: '2001 总决赛 G1 完整回顾：艾弗森 48 分破不败金身', dur: '1:34:37' },
+        { id: 'BV1rRTL6KECZ', title: '2001 总决赛 G2 完整回顾：AI 燃尽 vs 巅峰 OK', dur: '1:33:09' },
+        { id: 'BV19gKJ6fEex', title: '2010 总决赛 G7 决胜时刻完整回顾', dur: '19:59' },
+        { id: 'BV1Tu7S6wEy7', title: '最惨烈的冠军：2010 抢七复仇绿军', dur: '14:26' },
+        { id: 'BV1kNKU6RE2r', title: '2009 总决赛 G1：科比 40 分 8 板 8 助', dur: '15:00' },
+        { id: 'BV1a5EX6EESV', title: '2000 总决赛 G4：21 岁科比加时接管比赛', dur: '11:30' },
+        { id: 'BV1ouhG6CEjS', title: '2000 G4 奥尼尔六犯离场，科比补篮准绝杀', dur: '7:30' },
+        { id: 'BV1dJeW6jEfY', title: '2010 总决赛 G7 湖人 vs 凯尔特人 抢七夺冠', dur: '6:25' },
+        { id: 'BV1aERFYAEQP', title: '2010 抢七逆转绿军，复仇夺冠', dur: '2:45' }
+      ]
+    },
+    {
+      tag: '三节 62 分 · 2005',
+      items: [
+        { id: 'BV1CL8q6QEch', title: '三节 62 分屠牛：一人得分超小牛全队', dur: '32:13' },
+        { id: 'BV1qWuz6aEcr', title: '单节 30 分、三节 52 分打爆西部第一爵士', dur: '3:31' },
+        { id: 'BV1mah56iEhd', title: '2002 西决 G4：最后 5 分钟连拿 10 分准绝杀马刺', dur: '6:36' }
+      ]
+    },
+    {
+      tag: '谢幕之战 · 60 分',
+      items: [
+        { id: 'BV1sUNW6xEVS', title: '60 分光荣退休：退役战全场集锦', dur: '27:43' },
+        { id: 'BV1Aobk6KELy', title: '最后一季，每一帧都是青春（上）', dur: '20:25' },
+        { id: 'BV1anVUzgEtx', title: '退役战开场：魔术师与群星致敬科比', dur: '8:21' }
+      ]
+    },
+    {
+      tag: '纪录片 · 科比的缪斯',
+      items: [
+        { id: 'BV1MeGh6eEPM', title: '科比的缪斯 Kobe Bryant\'s Muse（中文字幕 1080P 完整版）', dur: '2:23:50' },
+        { id: 'BV1SAK5efEoN', title: '曼巴三部曲（二）：从小飞侠到黑曼巴', dur: '27:41' },
+        { id: 'BV1T1Jj6LER5', title: '科比生涯纪录片全集（下）', dur: '19:19' },
+        { id: 'BV1cqYVz3EDG', title: '黑曼巴十年五冠封神巅峰', dur: '11:58' },
+        { id: 'BV1aSgH6yE59', title: '8 号是暴力美学，24 号是技术大成：生涯十佳球', dur: '6:43' }
+      ]
+    },
+    {
+      tag: '名场面 · 绝杀',
+      items: [
+        { id: 'BV1Ypgu6yESE', title: '95 秒 3 记三分，13 年绝境三连击又是猛龙', dur: '8:10' },
+        { id: 'BV1WT421v7q9', title: '2006 首轮 G4：双绝杀太阳的背后', dur: '1:40' },
+        { id: 'BV15F411z7Jb', title: '经典绝杀系列：双绝杀太阳', dur: '0:49' }
+      ]
+    },
+    {
+      tag: '开讲啦 · 科比中国行',
+      items: [
+        { id: 'BV1r7411673K', title: '开讲啦：科比讲述黑曼巴精神（完整）', dur: '44:29' },
+        { id: 'BV1tV4y1C71Y', title: '开讲啦：黑曼巴的由来', dur: '2:49' },
+        { id: 'BV1rV4y1C7YB', title: '开讲啦：杰伦唱歌比打球好', dur: '2:01' }
+      ]
+    },
+    {
+      tag: '篮球公园 · 央视镜头',
+      items: [
+        { id: 'BV1HT411R7jV', title: '篮球公园：科比教你篮球绝招', dur: '8:42' },
+        { id: 'BV1mt411S7iw', title: '篮球公园：张卫平专访科比', dur: '7:01' },
+        { id: 'BV1Et4y1G7Tn', title: '2007 篮球公园：科比交易？最后的 OK 组合', dur: '4:09' }
+      ]
+    }
+  ];
+
+  function renderKobeClassics() {
+    if (!el.classics) return;
+    var total = 0;
+    el.classics.innerHTML = KOBE_CLASSICS.map(function (group) {
+      total += group.items.length;
+      return '<div class="kc-group"><h4>' + esc(group.tag) + '</h4><div class="kc-grid">' +
+        group.items.map(function (it) {
+          return '<article class="kv-card focusable" tabindex="-1" data-bv="' + esc(it.id) + '" data-title="' + esc(it.title) + '">' +
+            '<img loading="lazy" alt="" data-stage="0" src="assets/kobe/covers/' + esc(it.id) + '.jpg">' +
+            '<span class="kv-dur">' + esc(it.dur) + '</span>' +
+            '<span class="kv-play">▶</span>' +
+            '<div class="kv-body"><div class="kv-title">' + esc(it.title) + '</div></div>' +
+            '</article>';
+        }).join('') +
+        '</div></div>';
+    }).join('');
+    if (el.kcCount) el.kcCount.textContent = total + ' 个视频';
+
+    // 封面兜底：本地封面 → 线上代理 → 占位块，避免线上 B 站接口 502 出现破图
+    var imgs = el.classics.querySelectorAll('.kv-card img');
+    Array.prototype.forEach.call(imgs, function (img) {
+      img.addEventListener('error', function () {
+        var card = img.closest ? img.closest('.kv-card') : null;
+        var bv = card ? card.getAttribute('data-bv') : '';
+        var stage = img.getAttribute('data-stage') || '0';
+
+        if (stage === '0' && bv) {
+          img.setAttribute('data-stage', '1');
+          setTimeout(function () {
+            img.src = api('/api/bili/cover?bv=' + bv);
+          }, 600);
+          return;
+        }
+
+        var fb = document.createElement('div');
+        fb.className = 'kv-thumb-fallback';
+        fb.textContent = '封面暂不可用';
+        if (img.parentNode) img.parentNode.replaceChild(fb, img);
+      });
+    });
+  }
+
+  /** 在本页播放器里直接打开 B 站视频（视频流由本机服务转发，不跳外链） */
+  function openKobeVideo(bv, title) {
+    clearKobeEmbed();
+    state.backHash = '#/kobe';
+    state.screen = 'replay';
+    state.detailId = 'kobe-' + bv;
+    stopLive();
+
+    el.listScreen.hidden = true;
+    el.rankScreen.hidden = true;
+    el.schScreen.hidden = true;
+    el.kobeScreen.hidden = true;
+    el.liveScreen.hidden = true;
+    el.replayScreen.hidden = false;
+    syncNav('');
+
+    el.replayHead.innerHTML =
+      '<h2>' + esc(title) + '</h2>' +
+      '<p class="replay-sub">科比经典视频 · 片源来自 B 站，由本机服务转发</p>';
+    el.lines.innerHTML = '';
+    el.playerState.hidden = false;
+    el.playerState.textContent = '加载中…';
+    el.pbCur.textContent = '00:00';
+    el.pbTotal.textContent = '--:--';
+    el.pbFill.style.width = '0%';
+    setPlayerFull(false);
+    // 经典视频不做断点续播，每次都从头看
+    resumeApplied = true;
+    if (el.playerBar) el.playerBar.classList.remove('show');
+    setFocus(el.playerWrap, true);
+    showPlayerTip('按 OK 全屏播放', 2600);
+    window.scrollTo(0, 0);
+
+    // 关掉 BGM，别和视频声音叠在一起
+    stopKobeBgm();
+
+    if (state.hls) {
+      state.hls.destroy();
+      state.hls = null;
+    }
+
+    // 封面优先用本地包里的图，线上接口挂了也不影响播放页
+    el.video.poster = 'assets/kobe/covers/' + bv + '.jpg';
+    el.video.preload = 'auto';
+    el.video.src = api('/api/bili/video?bv=' + bv);
+
+    el.video.onloadeddata = function () {
+      el.playerState.hidden = true;
+      syncProgress();
+    };
+    el.video.onerror = function () {
+      if (state.detailId !== 'kobe-' + bv) return;
+      el.playerState.hidden = false;
+      if (!inNativeShell()) {
+        el.playerState.textContent = '本机转发没取到片源，正在切 B 站播放器…';
+        setTimeout(function () {
+          if (state.detailId === 'kobe-' + bv && state.screen === 'replay') playKobeEmbed(bv);
+        }, 900);
+        return;
+      }
+      el.playerState.textContent = '视频加载失败，返回重新选一个';
+    };
+
+    var p = el.video.play();
+    if (p && p.catch) p.catch(function () {});
+  }
+
   // ---------------- 科比专属 BGM ----------------
 
   var KOBE_BGM = [
     { name: 'Because of You', file: 'assets/kobe/Because of You.mp3' },
     { name: 'Dancing With Your Ghost', file: 'assets/kobe/Dancing With Your Ghost.mp3' },
-    { name: 'See You Again', file: 'assets/kobe/See You Again.mp3' }
+    { name: 'See You Again', file: 'assets/kobe/See You Again.mp3?v=2' }
   ];
   var bgm = { idx: -1, want: false };
 
@@ -1198,8 +1423,13 @@
     }
     if (full) {
       nativeFull(true);
+      var web = document.body.classList.contains('is-web');
       showPlayerTip(
-        state.isLive ? '返回键退出全屏' : 'OK 暂停/播放 · 长按 ← → 快退/快进 · 返回键缩小',
+        state.isLive
+          ? '返回键退出全屏'
+          : web
+          ? '单击暂停 / 播放 · 快速双击退出全屏 · 点进度条跳转'
+          : 'OK 暂停/播放 · 长按 ← → 快退/快进 · 返回键缩小',
         3500
       );
     } else {
@@ -1399,6 +1629,7 @@
     state.screen = 'replay';
     state.detailId = id;
     stopLive();
+    clearKobeEmbed();
     el.listScreen.hidden = true;
     el.rankScreen.hidden = true;
     el.schScreen.hidden = true;
@@ -1570,11 +1801,30 @@
   // 从直播播放页返回时要恢复焦点的比赛地址
   var pendingLiveFocus = '';
 
+  function kobeVideoTitle(bv) {
+    var list = KOBE_CLASSICS;
+    for (var i = 0; i < list.length; i++) {
+      for (var j = 0; j < list[i].items.length; j++) {
+        if (list[i].items[j].id === bv) return list[i].items[j].title;
+      }
+    }
+    return '科比经典视频';
+  }
+
   function route() {
     var hash = location.hash || '';
+    // 离开科比视频页就把内嵌播放器摘掉，别在后台继续出声
+    if (!/^#\/play\//.test(hash)) clearKobeEmbed();
     var m = hash.match(/^#\/replay\/(.+)$/);
     if (m) {
       showReplay(decodeURIComponent(m[1]));
+      return;
+    }
+
+    // 分享链接：#/play/BVxxxx 直接打开某个经典视频
+    var pv = hash.match(/^#\/play\/(BV[0-9A-Za-z]{10})$/);
+    if (pv) {
+      openKobeVideo(pv[1], kobeVideoTitle(pv[1]));
       return;
     }
 
@@ -1609,11 +1859,114 @@
     if (!state.page) loadNext();
   }
 
+  // ---------------- 原生壳判断 ----------------
+
+  /** App 内（WebView 原生壳）会注入 NativeApp；浏览器里没有 */
+  function inNativeShell() {
+    try {
+      if (window.NativeApp || window.WuxieApp) return true;
+    } catch (err) {
+      /* 忽略 */
+    }
+    return /wuxieapp|wuxie-app/i.test(navigator.userAgent || '');
+  }
+
+  /** 网页里显示「下载安装包」，App 内隐藏 */
+  function initDownloadEntry() {
+    var native = inNativeShell();
+    if (document.body) document.body.classList.toggle('is-app', native);
+    if (el.dlEntry) el.dlEntry.hidden = native;
+  }
+
+  // ---------------- 网页端（浏览器）专属交互 ----------------
+  // APK（电视 / 手机壳）里一律不启用，遥控器逻辑完全不动
+
+  var wrapClickTimer = null;
+  var wrapClickCount = 0;
+
+  /** 按比例跳到指定位置，像其他播放器一样点哪播哪 */
+  function seekToRatio(ratio) {
+    var dur = el.video.duration || 0;
+    if (!dur || !isFinite(dur)) return;
+    var to = Math.max(0, Math.min(dur - 0.3, dur * ratio));
+    try {
+      el.video.currentTime = to;
+    } catch (err) {
+      return;
+    }
+    syncProgress();
+    if (el.video.paused) el.video.play().catch(function () {});
+    showBar(2200);
+  }
+
+  function ratioOfEvent(e) {
+    var rect = el.pbTrack.getBoundingClientRect();
+    var x = (e.clientX || 0) - rect.left;
+    if (!rect.width) return 0;
+    return Math.min(1, Math.max(0, x / rect.width));
+  }
+
+  function initWebPlayer() {
+    if (inNativeShell()) return; // APK 内不折腾
+    document.body.classList.add('is-web');
+
+    if (el.pbFull) el.pbFull.hidden = false;
+
+    // 点 / 拖进度条 → 就地跳转播放（直播页是 iframe，跳过）
+    if (el.pbTrack) {
+      var dragging = false;
+
+      el.pbTrack.addEventListener('pointerdown', function (e) {
+        if (state.screen !== 'replay' || state.isLive) return;
+        dragging = true;
+        e.preventDefault();
+        e.stopPropagation();
+        seekToRatio(ratioOfEvent(e));
+      });
+
+      el.pbTrack.addEventListener('pointermove', function (e) {
+        if (!dragging || state.screen !== 'replay' || state.isLive) return;
+        e.stopPropagation();
+        seekToRatio(ratioOfEvent(e));
+      });
+
+      ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (name) {
+        el.pbTrack.addEventListener(name, function () {
+          dragging = false;
+        });
+      });
+
+      // 进度条区域的点击不要穿透成「放大 / 暂停」
+      el.pbTrack.addEventListener('click', function (e) {
+        e.stopPropagation();
+      });
+
+      var pbWrap = el.pbTrack.parentNode;
+      if (pbWrap) {
+        pbWrap.addEventListener('click', function (e) {
+          if (el.pbTrack.contains(e.target) || e.target === el.pbFull) e.stopPropagation();
+        });
+      }
+    }
+
+    // 右下角全屏按钮
+    if (el.pbFull) {
+      el.pbFull.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (state.screen !== 'replay') return;
+        if (state.playerFull) exitPlayerFull();
+        else enterPlayerFull();
+      });
+    }
+  }
+
   // ---------------- 作者微信弹框 ----------------
 
   function openAuthor() {
     if (!el.authorModal) return;
     state.modalOpen = true;
+    state.modalKind = 'author';
     el.authorModal.hidden = false;
     setFocus(el.authorClose || el.authorModal);
   }
@@ -1621,8 +1974,33 @@
   function closeAuthor() {
     if (!state.modalOpen) return;
     state.modalOpen = false;
+    state.modalKind = '';
     el.authorModal.hidden = true;
     setFocus(el.authorBtn, true);
+  }
+
+  // ---------------- 下载安装包弹框 ----------------
+
+  function openDownload() {
+    if (!el.dlModal || inNativeShell()) return; // App 里不弹
+    state.modalOpen = true;
+    state.modalKind = 'download';
+    el.dlModal.hidden = false;
+    setFocus(el.dlModal.querySelector('.dl-item') || el.dlModal);
+  }
+
+  function closeDownload() {
+    if (!state.modalOpen) return;
+    state.modalOpen = false;
+    state.modalKind = '';
+    el.dlModal.hidden = true;
+    if (el.dlEntry) setFocus(el.dlEntry, true);
+  }
+
+  /** 无论当前开的是哪个弹框，统一关掉 */
+  function closeModal() {
+    if (state.modalKind === 'download') closeDownload();
+    else closeAuthor();
   }
 
   // ---------------- 事件 ----------------
@@ -1630,6 +2008,14 @@
   document.addEventListener('click', function (e) {
     var target = e.target;
     if (!target || !target.closest) return;
+
+    // 科比经典视频卡片：直接在本页播放
+    var vcard = target.closest('[data-bv]');
+    if (vcard) {
+      setFocus(vcard);
+      openKobeVideo(vcard.dataset.bv, vcard.dataset.title || '科比经典视频');
+      return;
+    }
 
     var navBtn = target.closest('[data-nav]');
     if (navBtn) {
@@ -1752,6 +2138,8 @@
       else if (name === 'retry-replay') showReplay(state.detailId);
       else if (name === 'author') openAuthor();
       else if (name === 'close-author') closeAuthor();
+      else if (name === 'download') openDownload();
+      else if (name === 'close-download') closeDownload();
       return;
     }
 
@@ -1841,7 +2229,7 @@
   /** 返回：视频全屏时先缩小，回放页回列表，其余回上一页 */
   function handleBackKey() {
     if (state.modalOpen) {
-      closeAuthor();
+      closeModal();
       return;
     }
     if (state.playerFull) {
@@ -1934,6 +2322,25 @@
   // 鼠标点视频也能全屏 / 暂停
   el.playerWrap.addEventListener('click', function () {
     if (state.screen !== 'replay') return;
+
+    // 网页端全屏状态：单击暂停/播放，快速双击直接退出全屏
+    if (state.playerFull && document.body.classList.contains('is-web')) {
+      wrapClickCount += 1;
+      if (wrapClickCount === 1) {
+        clearTimeout(wrapClickTimer);
+        wrapClickTimer = setTimeout(function () {
+          wrapClickCount = 0;
+          if (state.playerFull) togglePlay();
+        }, 260);
+      } else {
+        clearTimeout(wrapClickTimer);
+        wrapClickTimer = null;
+        wrapClickCount = 0;
+        exitPlayerFull();
+      }
+      return;
+    }
+
     if (state.playerFull) togglePlay();
     else enterPlayerFull();
   });
@@ -2082,7 +2489,24 @@
     if (state.screen === 'list' && !state.page) loadNext();
   };
 
+  // 百度统计：单页应用里 hash 变化也记一次 PV，后台才能看到各页面访问量
+  function trackPageview() {
+    try {
+      if (window._hmt) {
+        var path = (location.hash || '').replace(/^#/, '');
+        _hmt.push(['_trackPageview', path || '/']);
+      }
+    } catch (err) {
+      /* 统计脚本没加载到就算了 */
+    }
+  }
+  window.addEventListener('hashchange', trackPageview);
+  trackPageview();
+
   el.schDate.value = state.date;
+  initDownloadEntry();
+  initWebPlayer();
+  renderKobeClassics();
   renderMorePanel();
   renderBgm();
   route();

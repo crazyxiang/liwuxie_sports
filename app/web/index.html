@@ -37,8 +37,29 @@
     <span class="updated" id="updated">—</span>
     <button class="btn refresh focusable" id="refresh">刷新</button>
     <button class="btn focusable" data-action="author">李无邪</button>
+    <button class="btn dl-entry focusable" id="dl-entry" data-action="download" hidden>下载</button>
   </div>
 </header>
+
+<!-- 下载安装包（只在网页里出现，App 内由脚本隐藏） -->
+<div class="modal" id="download-modal" hidden>
+  <div class="modal-mask" data-action="close-download"></div>
+  <div class="modal-card dl-card">
+    <h3>下载安装包</h3>
+    <p>选一个版本，装到对应设备</p>
+    <a class="dl-item focusable" id="dl-tv" href="apk_package/liwuxie-tv.apk" download="liwuxie-tv.apk">
+      <strong>电视版 APK</strong>
+      <span>华为智慧屏 / 安卓电视，带电视横幅，插 U 盘或 adb 安装</span>
+      <em>4.3 MB</em>
+    </a>
+    <a class="dl-item focusable" id="dl-phone" href="apk_package/liwuxie-phone.apk" download="liwuxie-phone.apk">
+      <strong>手机版 APK</strong>
+      <span>安卓手机 / 平板，桌面图标直接进入，无电视横幅</span>
+      <em>4.3 MB</em>
+    </a>
+    <button class="btn focusable" data-action="close-download">关闭</button>
+  </div>
+</div>
 
 <!-- 作者微信 -->
 <div class="modal" id="author-modal" hidden>
@@ -131,6 +152,7 @@
 
   <!-- 科比专栏 -->
   <section class="screen kobe" id="screen-kobe" hidden>
+
     <div class="kobe-hero">
       <img src="assets/kobe/hero.jpg" alt="Kobe Bryant">
       <div class="kobe-hero-mask"></div>
@@ -159,6 +181,16 @@
       <div class="kobe-stat"><strong>18</strong><span>全明星</span></div>
       <div class="kobe-stat"><strong>33,643</strong><span>生涯得分</span></div>
       <div class="kobe-stat"><strong>81</strong><span>单场最高分</span></div>
+    </div>
+
+    <!-- 经典视频（页面内播放） -->
+    <div class="kobe-classics">
+      <div class="kc-head">
+        <h3>经典视频 · 曼巴档案</h3>
+        <span class="kc-tip" id="kc-count"></span>
+      </div>
+      <div id="kobe-classics"></div>
+      <p class="kc-hint">片源来自 B 站，由本机服务转发，点卡片直接在本页播放，不用跳转。</p>
     </div>
 
     <div class="kobe-split">
@@ -247,8 +279,13 @@
       <div class="player-tip" id="player-tip">按 OK 全屏播放</div>
       <div class="player-bar">
         <span class="pb-time" id="pb-cur">00:00</span>
-        <div class="pb-track"><div class="pb-fill" id="pb-fill"></div></div>
+        <div class="pb-track" id="pb-track"><div class="pb-fill" id="pb-fill"></div></div>
         <span class="pb-time" id="pb-total">--:--</span>
+        <button class="pb-full" id="pb-full" type="button" aria-label="全屏" title="全屏 / 退出全屏" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
       </div>
     </div>
     <div class="replay-side">
@@ -263,5 +300,16 @@
 
 <script src="assets/vendor/hls.min.js"></script>
 <script src="assets/js/app.js"></script>
+
+<!-- 百度统计：网页端与 App 内 WebView 都会加载（WebView 需要联网） -->
+<script>
+var _hmt = _hmt || [];
+(function() {
+  var hm = document.createElement("script");
+  hm.src = "https://hm.baidu.com/hm.js?b6e6a657005b33a63eefd01231fab72c";
+  var s = document.getElementsByTagName("script")[0];
+  s.parentNode.insertBefore(hm, s);
+})();
+</script>
 </body>
 </html>
