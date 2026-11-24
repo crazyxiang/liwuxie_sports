@@ -49,7 +49,7 @@ public class MainActivity extends Activity {
         setContentView(R.layout.activity_main);
 
         // 电视本机起一个数据服务，页面只跟 127.0.0.1 打交道
-        tvServer = new TvServer(API_PORT);
+        tvServer = new TvServer(API_PORT, this);
         tvServer.start();
 
         root = findViewById(R.id.root);

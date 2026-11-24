@@ -20,6 +20,12 @@ const PORT = Number(process.env.PORT || 8787);
 const SITE = 'https://www.doubaozhibo.com';
 const QQ = 'https://matchweb.sports.qq.com';
 const NBA_ID = '100000'; // 腾讯体育的 NBA 赛事 ID
+
+// 科比页远程数据：jsDelivr 主线路（国内相对快），raw GitHub 备用
+const KOBE_DATA_URLS = [
+  'https://cdn.jsdelivr.net/gh/crazyxiang/liwuxie_sports@main/app/web/assets/data/kobe.json',
+  'https://raw.githubusercontent.com/crazyxiang/liwuxie_sports/main/app/web/assets/data/kobe.json'
+];
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -662,7 +668,61 @@ async function handleBiliCover(req, res, url) {
   }
 }
 
+// ---------------- 科比页远程数据（可热更新） ----------------
+
+function kobeJsonValid(data) {
+  return data && typeof data === 'object' && Array.isArray(data.videoGroups) && data.videoGroups.length > 0;
+}
+
+async function refreshKobeCache() {
+  for (const src of KOBE_DATA_URLS) {
+    try {
+      const r = await fetch(src, {
+        headers: { 'User-Agent': UA, 'Cache-Control': 'no-cache' },
+        signal: AbortSignal.timeout(3500)
+      });
+      if (!r.ok) continue;
+      const data = await r.json();
+      if (!kobeJsonValid(data)) continue;
+      writeDisk('kobe-remote', { at: Date.now(), data });
+      return data;
+    } catch {
+      /* 换下一条线路 */
+    }
+  }
+  return null;
+}
+
+async function handleKobe(req, res, url) {
+  const force = url.searchParams.get('refresh') === '1';
+  const bundled = path.join(ROOT, 'assets/data/kobe.json');
+  const entry = readDisk('kobe-remote');
+
+  if (!force && entry && kobeJsonValid(entry.data)) {
+    // 命中缓存立即返回，过期了再在后台更新，绝不拖慢首屏
+    if (Date.now() - entry.at > 30 * 60 * 1000) refreshKobeCache();
+    return json(res, 200, entry.data);
+  }
+
+  if (force) {
+    const remote = await refreshKobeCache();
+    if (remote) return json(res, 200, remote);
+  }
+
+  try {
+    const data = JSON.parse(fs.readFileSync(bundled, 'utf8'));
+    // 先给本地打包数据，远端结果后台补进来
+    writeDisk('kobe-remote', { at: Date.now(), data });
+    refreshKobeCache();
+    return json(res, 200, data);
+  } catch (err) {
+    if (entry && kobeJsonValid(entry.data)) return json(res, 200, entry.data);
+    return json(res, 502, { error: '科比数据不可用', detail: String(err.message || err) });
+  }
+}
+
 async function handleApi(req, res, url) {
+  if (url.pathname === '/api/kobe') return handleKobe(req, res, url);
   if (url.pathname === '/api/bili/video') return handleBiliVideo(req, res, url);
   if (url.pathname === '/api/bili/cover') return handleBiliCover(req, res, url);
 

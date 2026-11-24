@@ -18,6 +18,12 @@ const UA =
 
 const CATEGORIES = { basketball: '篮球', football: '足球' };
 
+// 科比页远程数据：jsDelivr 主线路，raw GitHub 备用
+const KOBE_DATA_URLS = [
+  'https://cdn.jsdelivr.net/gh/crazyxiang/liwuxie_sports@main/app/web/assets/data/kobe.json',
+  'https://raw.githubusercontent.com/crazyxiang/liwuxie_sports/main/app/web/assets/data/kobe.json'
+];
+
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET,OPTIONS',
@@ -745,6 +751,37 @@ async function handleBiliCover(url) {
 // ---------------- 路由 ----------------
 
 async function handleApi(url, request, env, ctx) {
+  if (url.pathname === '/api/kobe') {
+    const force = url.searchParams.get('refresh') === '1';
+    try {
+      return await cachedJson(new Request(`${url.origin}/api/kobe`), force ? 1 : 1800, async () => {
+        for (const src of KOBE_DATA_URLS) {
+          try {
+            const r = await fetch(src, {
+              headers: { 'User-Agent': UA, 'Cache-Control': 'no-cache' },
+              cf: { cacheTtl: 300 }
+            });
+            if (!r.ok) continue;
+            const data = await r.json();
+            if (data && Array.isArray(data.videoGroups) && data.videoGroups.length) return data;
+          } catch {
+            /* 换下一条线路 */
+          }
+        }
+        // 远端都拿不到时回落到打包在站点里的默认数据
+        if (env && env.ASSETS) {
+          const local = await env.ASSETS.fetch(new Request(`${url.origin}/assets/data/kobe.json`));
+          if (local.ok) return await local.json();
+        }
+        const local2 = await fetch(new URL('/assets/data/kobe.json', url.origin).toString());
+        if (local2.ok) return await local2.json();
+        throw new Error('科比数据不可用');
+      }, { ctx, force });
+    } catch (err) {
+      return json({ error: '科比数据不可用', detail: String(err.message || err) }, 502);
+    }
+  }
+
   if (url.pathname === '/api/replays') {
     const category = url.searchParams.get('category') || 'basketball';
     const page = Math.max(1, Number(url.searchParams.get('page')) || 1);

@@ -73,11 +73,12 @@
     liveTitle: '',
     liveLines: [],
     // 科比专栏
-    kobe: { loaded: false, loading: false, items: [] },
+    kobe: { loaded: false, loading: false, items: [], dataAt: 0 },
     // 直播（默认选中 NBA）
     live: { loaded: false, loading: false, filter: 'NBA', items: [] },
     // 作者微信弹框
     modalOpen: false,
+    lightboxOpen: false,
     // 当前打开的是哪个弹框：'author' | 'download'
     modalKind: ''
   };
@@ -155,7 +156,23 @@
 
     // 科比经典视频
     classics: document.getElementById('kobe-classics'),
-    kcCount: document.getElementById('kc-count')
+    kcCount: document.getElementById('kc-count'),
+    kcCats: document.getElementById('kc-cats'),
+
+    // 科比页 hero / 曼巴精神轮播
+    heroMedia: document.getElementById('kobe-hero-media'),
+    heroDots: document.getElementById('kobe-hero-dots'),
+    heroTitle: document.getElementById('kobe-hero-title'),
+    heroSub: document.getElementById('kobe-hero-sub'),
+    heroLine: document.getElementById('kobe-hero-line'),
+    spiritCard: document.getElementById('spirit-card'),
+    spiritTrack: document.getElementById('spirit-track'),
+    spiritDots: document.getElementById('spirit-dots'),
+    spiritCaption: document.getElementById('spirit-caption'),
+    lightbox: document.getElementById('kobe-lightbox'),
+    lbImg: document.getElementById('kobe-lb-img'),
+    lbCap: document.getElementById('kobe-lb-cap'),
+    lbClose: document.getElementById('kobe-lb-close')
   };
 
   // ---------------- 工具 ----------------
@@ -1106,6 +1123,139 @@
 
   // ---------------- 科比专栏 ----------------
 
+  // ---------------- hero 轮播 ----------------
+
+  var heroIdx = 0;
+  var heroTimer = null;
+
+  function heroSlides() {
+    return (kobeData.hero && kobeData.hero.slides) || [];
+  }
+
+  function renderKobeHero() {
+    if (!el.heroMedia) return;
+    var slides = heroSlides();
+    if (!slides.length) return;
+
+    el.heroMedia.innerHTML = slides.map(function (s, i) {
+      var media = s.type === 'video'
+        ? '<video muted loop playsinline preload="none"' + (s.poster ? ' poster="' + esc(s.poster) + '"' : '') + ' src="' + esc(s.src) + '"></video>'
+        : '<img src="' + esc(s.src) + '" alt="">';
+      return '<div class="kh-slide' + (i === 0 ? ' is-on' : '') + '" data-hero="' + i + '">' + media + '</div>';
+    }).join('');
+
+    if (el.heroDots) {
+      el.heroDots.innerHTML = slides.length > 1 ? slides.map(function (s, i) {
+        return '<button class="kobe-hero-dot' + (i === 0 ? ' is-on' : '') + '" data-hero-dot="' + i + '" aria-label="第 ' + (i + 1) + ' 张"></button>';
+      }).join('') : '';
+    }
+
+    heroIdx = 0;
+    applyHeroSlide(0);
+    restartHeroTimer();
+  }
+
+  function applyHeroSlide(i) {
+    var slides = heroSlides();
+    if (!slides.length) return;
+    heroIdx = (i + slides.length) % slides.length;
+    var boxes = el.heroMedia.querySelectorAll('.kh-slide');
+    for (var k = 0; k < boxes.length; k++) {
+      var on = k === heroIdx;
+      boxes[k].classList.toggle('is-on', on);
+      var vid = boxes[k].querySelector('video');
+      if (vid) {
+        if (on) {
+          var p = vid.play();
+          if (p && p.catch) p.catch(function () {});
+        } else {
+          try { vid.pause(); vid.currentTime = 0; } catch (err) { /* 忽略 */ }
+        }
+      }
+    }
+    var dots = el.heroDots ? el.heroDots.querySelectorAll('.kobe-hero-dot') : [];
+    for (var d = 0; d < dots.length; d++) dots[d].classList.toggle('is-on', d === heroIdx);
+
+    var s = slides[heroIdx];
+    if (el.heroTitle) el.heroTitle.textContent = s.title || 'Kobe Bryant';
+    if (el.heroSub) el.heroSub.textContent = s.sub || '';
+    if (el.heroLine) el.heroLine.textContent = s.line || '';
+  }
+
+  function restartHeroTimer() {
+    clearInterval(heroTimer);
+    if (heroSlides().length < 2) return;
+    heroTimer = setInterval(function () {
+      if (state.screen !== 'kobe') return;
+      applyHeroSlide(heroIdx + 1);
+    }, kobeData.hero.interval || 5000);
+  }
+
+  // ---------------- 曼巴精神组图 ----------------
+
+  var spiritIdx = 0;
+  var spiritTimer = null;
+
+  function spiritImages() {
+    return (kobeData.spirit && kobeData.spirit.images) || [];
+  }
+
+  function renderSpirit() {
+    if (!el.spiritTrack) return;
+    var imgs = spiritImages();
+    if (!imgs.length) return;
+
+    el.spiritTrack.innerHTML = imgs.map(function (im, i) {
+      return '<div class="spirit-slide' + (i === 0 ? ' is-on' : '') + '"><img src="' + esc(im.src) + '" alt="' + esc(im.caption || '曼巴精神') + '" loading="lazy"></div>';
+    }).join('');
+
+    if (el.spiritDots) {
+      el.spiritDots.innerHTML = imgs.length > 1 ? imgs.map(function (im, i) {
+        return '<button class="spirit-dot' + (i === 0 ? ' is-on' : '') + '" data-spirit-dot="' + i + '" aria-label="第 ' + (i + 1) + ' 张"></button>';
+      }).join('') : '';
+    }
+
+    spiritIdx = 0;
+    applySpiritSlide(0);
+    clearInterval(spiritTimer);
+    if (imgs.length > 1) {
+      spiritTimer = setInterval(function () {
+        if (state.screen !== 'kobe' || state.lightboxOpen) return;
+        applySpiritSlide(spiritIdx + 1);
+      }, kobeData.spirit.interval || 6000);
+    }
+  }
+
+  function applySpiritSlide(i) {
+    var imgs = spiritImages();
+    if (!imgs.length) return;
+    spiritIdx = (i + imgs.length) % imgs.length;
+    var slides = el.spiritTrack.querySelectorAll('.spirit-slide');
+    for (var k = 0; k < slides.length; k++) slides[k].classList.toggle('is-on', k === spiritIdx);
+    var dots = el.spiritDots ? el.spiritDots.querySelectorAll('.spirit-dot') : [];
+    for (var d = 0; d < dots.length; d++) dots[d].classList.toggle('is-on', d === spiritIdx);
+    if (el.spiritCaption) el.spiritCaption.textContent = imgs[spiritIdx].caption || 'Black Mamba · 曼巴精神';
+  }
+
+  function openKobeLightbox() {
+    var imgs = spiritImages();
+    if (!imgs.length || !el.lightbox) return;
+    var im = imgs[spiritIdx];
+    state.lightboxOpen = true;
+    el.lbImg.src = im.src;
+    el.lbCap.textContent = im.caption || '';
+    el.lightbox.hidden = false;
+    setFocus(el.lbClose, true);
+  }
+
+  function closeKobeLightbox() {
+    if (!state.lightboxOpen) return;
+    state.lightboxOpen = false;
+    el.lightbox.hidden = true;
+    el.lbImg.removeAttribute('src');
+    setFocus(el.spiritCard, true);
+  }
+
   /** 分页扫回放列表，挑出湖人的比赛（页数据在服务端有缓存，成本很低） */
   function loadKobe(force) {
     if (state.kobe.loading) return;
@@ -1184,197 +1334,128 @@
 
   // ---------------- 科比经典视频（B 站片源，经本机服务转发） ----------------
 
-  var KOBE_CLASSICS = [
-    {
-      tag: '最后一战 · 退役战 60 分',
-      items: [
-        { id: 'BV1Xv8v6cEHL', title: '最后一舞：退役战 60 分全场回顾', dur: '41:24' },
-        { id: 'BV1sUNW6xEVS', title: '60 分光荣退休：退役战全场集锦', dur: '27:43' },
-        { id: 'BV14e411m7Xf', title: '退役战复盘：爵士真的放水了吗', dur: '19:56' },
-        { id: 'BV1gPYx6GE1r', title: '赛后杨健杨毅解说：60 分谢幕', dur: '16:08' },
-        { id: 'BV11A411H7ii', title: '最后一投与赛后演讲', dur: '5:16' },
-        { id: 'BV15i4y1Q7Wt', title: '60 分之夜：宝刀不老', dur: '10:25' },
-        { id: 'BV1anVUzgEtx', title: '退役战开场：魔术师与群星致敬', dur: '8:21' }
-      ]
+  // ---------------- 科比页数据（JSON 远程可更新） ----------------
+
+  // 内置兜底：即使 /api/kobe 拿不到，页面也不会空着
+  var KOBE_DEFAULT = {
+    version: 0,
+    hero: {
+      interval: 5000,
+      slides: [{ type: 'image', src: 'assets/kobe/hero.jpg', title: 'Kobe Bryant', sub: '1978.08.23 — 2020.01.26 · 8 & 24', line: '「你见过凌晨四点的洛杉矶吗？」' }]
     },
-    {
-      tag: '总决赛 · 三连冠 2000-2002',
-      items: [
-        { id: 'BV17hHY62ES5', title: '2000 总决赛 G5 全场：步行者 33 分大胜湖人', dur: '1:42:27' },
-        { id: 'BV1sM3b6SEN7', title: '2000 总决赛 G4 全集：科比加时接管', dur: '29:39' },
-        { id: 'BV1a5EX6EESV', title: '2000 总决赛 G4：21 岁科比加时接管比赛', dur: '11:30' },
-        { id: 'BV1ouhG6CEjS', title: '2000 G4 奥尼尔六犯离场，科比补篮准绝杀', dur: '7:30' },
-        { id: 'BV1qFjS65Eut', title: '2001 总决赛 G1 全场：艾弗森 48 分破金身', dur: '1:38:05' },
-        { id: 'BV1pK411A7Wg', title: '2001 总决赛全程回顾', dur: '1:27:32' },
-        { id: 'BV11K4y1w7gf', title: '2001 总决赛 经典重现：艾弗森单挑 OK', dur: '59:01' },
-        { id: 'BV1rRTL6KECZ', title: '2001 总决赛 G2 完整回顾：AI 燃尽 vs 巅峰 OK', dur: '1:33:09' },
-        { id: 'BV1YMsW6HEN2', title: '2002 总决赛原声集锦', dur: '17:32' },
-        { id: 'BV1d9sT61EWX', title: '2002 总决赛：科比表现集锦（含颁奖）', dur: '13:00' },
-        { id: 'BV1GkRyYsEnL', title: 'OK 三连冠：2002 总决赛王朝之路', dur: '16:35' }
-      ]
-    },
-    {
-      tag: '总决赛 · 2009-2010 复仇',
-      items: [
-        { id: 'BV1xLTM6SEPZ', title: '2010 总决赛 G7：湖人绿凯抢七全纪录', dur: '49:04' },
-        { id: 'BV1dtPueJEFK', title: '2010 抢七：21 世纪最激烈对决', dur: '33:28' },
-        { id: 'BV1tkjE65Ey2', title: '2010 G7 上半场：科比全场被包夹', dur: '11:01' },
-        { id: 'BV1ivHG6WEfB', title: '2010 总决赛全高光：复仇绿军第五冠', dur: '27:09' },
-        { id: 'BV19gKJ6fEex', title: '2010 总决赛 G7 决胜时刻完整回顾', dur: '19:59' },
-        { id: 'BV1Tu7S6wEy7', title: '最惨烈的冠军：2010 抢七复仇绿军', dur: '14:26' },
-        { id: 'BV1dJeW6jEfY', title: '2010 总决赛 G7 湖人 vs 凯尔特人 抢七夺冠', dur: '6:25' },
-        { id: 'BV1aERFYAEQP', title: '2010 抢七逆转绿军，复仇夺冠', dur: '2:45' },
-        { id: 'BV1Dftd6EEGQ', title: '2009 总决赛 G5 第四节（粤语解说）', dur: '50:22' },
-        { id: 'BV1Tct36JEqy', title: '2009 总决赛 G4 第一节（粤语解说）', dur: '41:04' },
-        { id: 'BV19zgK6KE5u', title: '2009 总决赛高光：生涯首座 FMVP', dur: '14:40' },
-        { id: 'BV1kNKU6RE2r', title: '2009 总决赛 G1：科比 40 分 8 板 8 助', dur: '15:00' }
-      ]
-    },
-    {
-      tag: '81 分之夜 · 2006',
-      items: [
-        { id: 'BV1U4qgBNEvb', title: '传奇 81 分：The Legend of the 81-Point Game', dur: '1:14:05' },
-        { id: 'BV1R6uF67E4s', title: '黑曼巴 81 分屠龙：完整回顾', dur: '30:06' },
-        { id: 'BV1eEkFBbEoV', title: '81 分屠龙夜：猛龙板凳席视角', dur: '17:33' },
-        { id: 'BV1DbfSYVEj1', title: '81 分夜经典复盘', dur: '12:14' },
-        { id: 'BV1zLNy6BE3T', title: '一战封神：重温 81 分屠龙神迹', dur: '27:51' },
-        { id: 'BV1scEK6rEmE', title: '半场 55 分、全场 81 分的统治级表演', dur: '5:22' },
-        { id: 'BV1LgfoYzEej', title: '81 分与三节 62 分的统治力', dur: '5:31' },
-        { id: 'BV1QhKCzkEbZ', title: '2006 年的 8 号科比到底有多强', dur: '1:14' }
-      ]
-    },
-    {
-      tag: '高分盛宴 · 62 / 61 / 55',
-      items: [
-        { id: 'BV1CL8q6QEch', title: '三节 62 分屠牛：一人得分超小牛全队', dur: '32:13' },
-        { id: 'BV1Q8ga6MEbP', title: '2005 年三节 62 分：极致的得分盛宴', dur: '5:52' },
-        { id: 'BV1ovbv6TEgp', title: '科比和小牛的故事：三节 62 分', dur: '9:31' },
-        { id: 'BV1HtbW6VEM3', title: '麦迪逊广场花园 61 分：打服纽约球迷', dur: '25:00' },
-        { id: 'BV1DDTd6cE1w', title: '61 分封神战：客场高呼 MVP', dur: '12:03' },
-        { id: 'BV19MbE6DEXb', title: '最后一次乔科大战：55 分 9 记三分', dur: '14:52' },
-        { id: 'BV1Uitu62ErX', title: '03 年对阵奇才：55 分全场精彩时刻', dur: '4:47' },
-        { id: 'BV1qWuz6aEcr', title: '单节 30 分、三节 52 分打爆西部第一爵士', dur: '3:31' }
-      ]
-    },
-    {
-      tag: '连续 4 场 50+ · 12 记三分',
-      items: [
-        { id: 'BV16Yy4z6EsS', title: '连续 4 场 50+ 第一场：65 分打开序幕', dur: '40:38' },
-        { id: 'BV1YzYx67EW3', title: '连续 4 场 50+：65 分只是开始', dur: '11:35' },
-        { id: 'BV1VJHn6iEvj', title: '65 分开启连续 4 场 50+ 神迹', dur: '16:00' },
-        { id: 'BV1XsWU6XE77', title: '对开拓者 65 分（第一场）集锦', dur: '9:42' },
-        { id: 'BV1thtN6vELd', title: '单场 12 记三分：45 分射落超音速', dur: '7:33' },
-        { id: 'BV148pm6qEEs', title: '12 记三分单场纪录', dur: '2:29' },
-        { id: 'BV1Ypgu6yESE', title: '95 秒 3 记三分，13 年绝境三连击又是猛龙', dur: '8:10' }
-      ]
-    },
-    {
-      tag: '绝杀与名场面',
-      items: [
-        { id: 'BV1t5Nr6kEih', title: '季后赛双绝杀太阳：决胜时刻全记录', dur: '30:32' },
-        { id: 'BV14z9MBTEBv', title: 'NBA 历史首个双绝杀', dur: '2:43' },
-        { id: 'BV1wzYe6nEyW', title: '漂移三分绝杀热火：科比 33 分 vs 韦德 26 分', dur: '30:50' },
-        { id: 'BV1To9MYLE63', title: '0.3 秒绝杀：全世界都知道他要投', dur: '1:59' },
-        { id: 'BV1X3hJ6sEL7', title: '2009 湖人 vs 热火：打板绝杀全程', dur: '47:58' },
-        { id: 'BV1nVMg6XEkY', title: '0.4 秒史诗绝杀：09 科韦之战', dur: '19:12' },
-        { id: 'BV174xH6sEum', title: 'NBA 史上最残暴隔扣合集', dur: '9:56' },
-        { id: 'BV1zotu6AEMd', title: '科比生涯隔扣集锦', dur: '9:04' },
-        { id: 'BV1V841147xF', title: '生涯 35 次绝杀全记录', dur: '2:25' },
-        { id: 'BV1WT421v7q9', title: '2006 首轮 G4：双绝杀太阳的背后', dur: '1:40' },
-        { id: 'BV15F411z7Jb', title: '经典绝杀系列：双绝杀太阳', dur: '0:49' }
-      ]
-    },
-    {
-      tag: '生涯集锦 · 百佳球',
-      items: [
-        { id: 'BV1UU3y6qErK', title: '从 8 号到 24 号：生涯 40 佳球', dur: '10:55' },
-        { id: 'BV1ZVLQ6JE72', title: '曼巴记忆：生涯十佳球', dur: '3:00' },
-        { id: 'BV1aSgH6yE59', title: '8 号是暴力美学，24 号是技术大成：十佳球', dur: '6:43' },
-        { id: 'BV1BYNE6cEjx', title: '40 大实战扣篮：美如画不止跳投', dur: '8:35' },
-        { id: 'BV1z4411u7n7', title: '回顾老大美如画的后仰跳投', dur: '8:14' },
-        { id: 'BV1RnpM6gENN', title: '沉浸式欣赏科比招牌后仰', dur: '7:37' },
-        { id: 'BV1bXVL6FE53', title: '乔丹 & 科比后仰跳投混剪', dur: '6:01' },
-        { id: 'BV1aB4y1N7fL', title: '科比的过人技术', dur: '3:00' },
-        { id: 'BV14Un16fEq6', title: '史上最顶级的单打球手', dur: '14:21' }
-      ]
-    },
-    {
-      tag: '中国行',
-      items: [
-        { id: 'BV1r7411673K', title: '开讲啦：科比讲述黑曼巴精神（完整）', dur: '44:29' },
-        { id: 'BV1tV4y1C71Y', title: '开讲啦：黑曼巴的由来', dur: '2:49' },
-        { id: 'BV1rV4y1C7YB', title: '开讲啦：杰伦唱歌比打球好', dur: '2:01' },
-        { id: 'BV1yJ411371p', title: '中国行和路人单挑：祭出 60% 功力', dur: '3:45' },
-        { id: 'BV1SW4y137fW', title: '中国行人气：万人空巷', dur: '2:49' },
-        { id: 'BV1f5411d72R', title: '上海行与球迷单挑（原声高清）', dur: '2:04' },
-        { id: 'BV1Mo4y1P7Z7', title: '亚洲行中国台湾省见面会', dur: '52:58' },
-        { id: 'BV13s411v7pB', title: '星球者联盟发布会：退役后中国首秀', dur: '42:15' },
-        { id: 'BV14741167Ls', title: '对中国球迷说：新年快乐，我爱你们', dur: '2:28' }
-      ]
-    },
-    {
-      tag: '篮球公园 · 央视镜头',
-      items: [
-        { id: 'BV1mt411S7iw', title: '篮球公园：张卫平专访科比', dur: '7:01' },
-        { id: 'BV1Et4y1G7Tn', title: '2007 篮球公园：科比交易？最后的 OK 组合', dur: '4:09' },
-        { id: 'BV1HT411R7jV', title: '篮球公园：科比教你篮球绝招', dur: '8:42' }
-      ]
-    },
-    {
-      tag: '纪录片 · 专访',
-      items: [
-        { id: 'BV1MeGh6eEPM', title: '科比的缪斯 Kobe Bryant\'s Muse（中文字幕 1080P 完整版）', dur: '2:23:50' },
-        { id: 'BV14p4y197Hp', title: '科比生涯纪录片《Muse》', dur: '1:23:09' },
-        { id: 'BV1V7411h7Hs', title: '科比的一天 Kobe Doin\' Work（斯派克·李）', dur: '1:31:03' },
-        { id: 'BV1SAK5efEoN', title: '曼巴三部曲（二）：从小飞侠到黑曼巴', dur: '27:41' },
-        { id: 'BV1T1Jj6LER5', title: '科比生涯纪录片全集（下）', dur: '19:19' },
-        { id: 'BV1cqYVz3EDG', title: '黑曼巴十年五冠封神巅峰', dur: '11:58' },
-        { id: 'BV1HD4y1X7pv', title: '科比生涯最励志的一段采访', dur: '33:51' },
-        { id: 'BV1bs411W78y', title: '科比 TED 演讲：意志的力量', dur: '42:08' },
-        { id: 'BV1No4y1R7mb', title: '跟腱断裂后的采访：眼眶泛泪', dur: '7:04' },
-        { id: 'BV1YYsbzSER6', title: '跟腱断裂仍坚持罚球', dur: '5:04' }
-      ]
-    },
-    {
-      tag: '退役演讲 · 球衣退役 · 奥斯卡',
-      items: [
-        { id: 'BV18PQeBuEVp', title: '科比退役演讲', dur: '3:01' },
-        { id: 'BV1f54y1s7xT', title: '球衣退役全程（中文回顾）', dur: '15:28' },
-        { id: 'BV194rYYZEjs', title: '球衣退役仪式演讲（中英字幕）', dur: '14:15' },
-        { id: 'BV1yu411r7SF', title: '球衣退役演讲：梦想不是终点', dur: '4:06' },
-        { id: 'BV1mW411x7p9', title: '奥斯卡最佳短片《亲爱的篮球》+ 获奖感言', dur: '13:55' },
-        { id: 'BV1gE411Z7GX', title: '亲爱的篮球完整版', dur: '5:23' },
-        { id: 'BV15x4y1174u', title: '雕像揭幕：菲尔·杰克逊致辞', dur: '11:01' }
-      ]
-    },
-    {
-      tag: '经典比赛',
-      items: [
-        { id: 'BV18nMF6MEpm', title: '2008 西决：20 分大逆转马刺', dur: '39:43' },
-        { id: 'BV1tCNx6qES3', title: '2010 湖人 vs 骑士全场回放', dur: '1:09:03' },
-        { id: 'BV1q7Hf6HEma', title: '2009 湖人 vs 骑士全场解说', dur: '53:46' }
-      ]
-    },
-    {
-      tag: '全明星 · 奥运 · 圣诞',
-      items: [
-        { id: 'BV1UF411y7n7', title: '2008 北京奥运男篮决赛：美国 vs 西班牙', dur: '2:12:26' },
-        { id: 'BV1uyuu6qEmm', title: '2012 全明星最后决胜阶段', dur: '4:45' },
-        { id: 'BV18Utb6gE9E', title: '2001 全明星全场精彩时刻', dur: '9:42' },
-        { id: 'BV1d1bT6dEdx', title: '2013 全明星全场精彩时刻', dur: '8:32' }
-      ]
-    }
-  ];
+    bgm: [
+      { name: 'Because of You', src: 'assets/kobe/Because of You.mp3', local: true },
+      { name: 'Dancing With Your Ghost', src: 'assets/kobe/Dancing With Your Ghost.mp3', local: true },
+      { name: 'See You Again', src: 'assets/kobe/See You Again.mp3?v=2', local: true }
+    ],
+    spirit: { interval: 6000, images: [{ src: 'assets/kobe/spirit/1.jpg', caption: 'Black Mamba · 曼巴精神' }] },
+    videoGroups: []
+  };
+
+  var kobeData = KOBE_DEFAULT;
+  var kobeDataReq = null;
+  var kobeDataError = false;
+
+  function normKobeData(raw) {
+    if (!raw || !Array.isArray(raw.videoGroups)) return null;
+    return {
+      version: raw.version || 0,
+      updatedAt: raw.updatedAt || '',
+      hero: {
+        interval: Math.max(2500, Number(raw.hero && raw.hero.interval) || 5000),
+        slides: (raw.hero && raw.hero.slides || []).map(function (s) {
+          return {
+            type: s.type === 'video' ? 'video' : 'image',
+            src: String(s.src || ''),
+            poster: String(s.poster || ''),
+            title: String(s.title || ''),
+            sub: String(s.sub || ''),
+            line: String(s.line || '')
+          };
+        }).filter(function (s) { return s.src; })
+      },
+      bgm: (raw.bgm || []).map(function (t) {
+        return { name: String(t.name || '未命名'), src: String(t.src || t.file || ''), local: !!t.local };
+      }).filter(function (t) { return t.src; }),
+      spirit: {
+        interval: Math.max(3000, Number(raw.spirit && raw.spirit.interval) || 6000),
+        images: (raw.spirit && raw.spirit.images || []).map(function (im) {
+          if (typeof im === 'string') return { src: im, caption: '' };
+          return { src: String(im.src || ''), caption: String(im.caption || '') };
+        }).filter(function (im) { return im.src; })
+      },
+      videoGroups: raw.videoGroups.map(function (g) {
+        return {
+          tag: String(g.tag || ''),
+          items: (g.items || []).map(function (it) {
+            return { bv: String(it.bv || it.id || ''), title: String(it.title || ''), dur: String(it.dur || '') };
+          }).filter(function (it) { return it.bv; })
+        };
+      }).filter(function (g) { return g.items.length; })
+    };
+  }
+
+  function loadKobeData(force) {
+    if (kobeDataReq && !force) return kobeDataReq;
+    kobeDataError = false;
+    kobeDataReq = fetch(api('/api/kobe' + (force ? '?refresh=1' : '')), { cache: force ? 'no-store' : 'default' })
+      .then(function (res) {
+        return res.json().then(function (data) {
+          if (data && data.error) throw new Error(data.detail || data.error);
+          return data;
+        });
+      })
+      .then(function (raw) {
+        var data = normKobeData(raw);
+        if (!data) throw new Error('数据结构不正确');
+        if (data.version && data.version === (kobeData.version || 0) && data.updatedAt === (kobeData.updatedAt || '')) {
+          kobeDataReq = null;
+          return kobeData;
+        }
+        kobeData = data;
+        state.kobe.dataAt = Date.now();
+        renderKobeHero();
+        renderBgm();
+        renderSpirit();
+        renderKobeClassics();
+        kobeDataReq = null;
+        return kobeData;
+      })
+      .catch(function (err) {
+        kobeDataReq = null;
+        kobeDataError = true;
+        if (!kobeData.videoGroups.length) renderKobeClassics();
+        return kobeData;
+      });
+    return kobeDataReq;
+  }
+
 
   function renderKobeClassics() {
     if (!el.classics) return;
+    var groups = kobeData.videoGroups || [];
+    var cur = currentFocus();
+    var focusBv = cur && cur.classList.contains('kv-card') ? cur.getAttribute('data-bv') : '';
+    var focusCat = cur && cur.classList.contains('kc-cat') ? cur.getAttribute('data-kc-jump') : '';
+
+    if (!groups.length) {
+      if (el.kcCats) el.kcCats.innerHTML = '';
+      el.classics.innerHTML = kobeDataError
+        ? '<div class="notice"><strong>片单加载失败</strong><span>检查网络后点右上角刷新重试</span></div>'
+        : '<div class="notice"><strong>正在加载片单…</strong><span>第一次打开稍等一下</span></div>';
+      if (el.kcCount) el.kcCount.textContent = '';
+      return;
+    }
+
     var total = 0;
-    el.classics.innerHTML = KOBE_CLASSICS.map(function (group) {
+    el.classics.innerHTML = groups.map(function (group, gi) {
       total += group.items.length;
-      return '<div class="kc-group"><h4>' + esc(group.tag) + '</h4><div class="kc-grid">' +
+      return '<div class="kc-group" id="kc-g-' + gi + '">' +
+        '<h4><span class="kc-idx">' + pad2(gi + 1) + '</span><span>' + esc(group.tag) + '</span><em>' + group.items.length + ' 部</em></h4>' +
+        '<div class="kc-grid">' +
         group.items.map(function (it) {
-          return '<article class="kv-card focusable" tabindex="-1" data-bv="' + esc(it.id) + '" data-title="' + esc(it.title) + '">' +
-            '<img loading="lazy" alt="" data-stage="0" src="assets/kobe/covers/' + esc(it.id) + '.jpg">' +
+          return '<article class="kv-card focusable" tabindex="-1" data-bv="' + esc(it.bv) + '" data-title="' + esc(it.title) + '">' +
+            '<img loading="lazy" alt="" data-stage="0" src="assets/kobe/covers/' + esc(it.bv) + '.jpg">' +
             '<span class="kv-dur">' + esc(it.dur) + '</span>' +
             '<span class="kv-play">▶</span>' +
             '<div class="kv-body"><div class="kv-title">' + esc(it.title) + '</div></div>' +
@@ -1382,7 +1463,22 @@
         }).join('') +
         '</div></div>';
     }).join('');
+
+    if (el.kcCats) {
+      el.kcCats.innerHTML = groups.map(function (group, gi) {
+        return '<button class="kc-cat focusable" data-kc-jump="' + gi + '"><b>' + pad2(gi + 1) + '</b>' + esc(group.tag) + '</button>';
+      }).join('');
+    }
     if (el.kcCount) el.kcCount.textContent = total + ' 个视频';
+
+    // 数据刷新后把焦点还给同一张卡/同一个分类
+    if (focusBv) {
+      var sameCard = el.classics.querySelector('.kv-card[data-bv="' + focusBv + '"]');
+      if (sameCard) setFocus(sameCard, true);
+    } else if (focusCat) {
+      var sameCat = el.kcCats ? el.kcCats.querySelector('.kc-cat[data-kc-jump="' + focusCat + '"]') : null;
+      if (sameCat) setFocus(sameCat, true);
+    }
 
     // 封面兜底：本地封面 → 线上代理 → 占位块，避免线上 B 站接口 502 出现破图
     var imgs = el.classics.querySelectorAll('.kv-card img');
@@ -1406,6 +1502,17 @@
         if (img.parentNode) img.parentNode.replaceChild(fb, img);
       });
     });
+  }
+
+  function jumpToKobeGroup(gi) {
+    var group = document.getElementById('kc-g-' + gi);
+    if (!group) return;
+    // 先把分类标题滚到吸顶栏下方，再聚焦第一张卡（不重复滚动）
+    var bar = document.querySelector('.topbar');
+    var top = (bar ? bar.getBoundingClientRect().bottom : 0) + 12;
+    window.scrollBy(0, group.getBoundingClientRect().top - top);
+    var first = group.querySelector('.kv-card');
+    if (first) setFocus(first, true);
   }
 
   /** 在本页播放器里直接打开 B 站视频（视频流由本机服务转发，不跳外链） */
@@ -1479,18 +1586,27 @@
 
   // ---------------- 科比专属 BGM ----------------
 
-  var KOBE_BGM = [
-    { name: 'Because of You', file: 'assets/kobe/Because of You.mp3' },
-    { name: 'Dancing With Your Ghost', file: 'assets/kobe/Dancing With Your Ghost.mp3' },
-    { name: 'See You Again', file: 'assets/kobe/See You Again.mp3?v=2' }
-  ];
   var bgm = { idx: -1, want: false };
+
+  function kobeBgmList() {
+    return (kobeData.bgm && kobeData.bgm.length) ? kobeData.bgm : KOBE_DEFAULT.bgm;
+  }
 
   function renderBgm() {
     if (!el.bgmList) return;
-    el.bgmList.innerHTML = KOBE_BGM.map(function (track, i) {
-      return '<button class="bgm-btn focusable" data-bgm="' + i + '">♪ ' + esc(track.name) + '</button>';
+    var focusedIdx = -1;
+    var cur = currentFocus();
+    if (cur && cur.classList.contains('bgm-btn')) focusedIdx = Number(cur.dataset.bgm);
+    el.bgmList.innerHTML = kobeBgmList().map(function (track, i) {
+      return '<button class="bgm-btn focusable" data-bgm="' + i + '" title="' +
+        (track.local ? '本地音乐，加载更快' : '在线音乐') + '">' +
+        (track.local ? '♪ ' : '♫ ') + esc(track.name) + '</button>';
     }).join('');
+    if (focusedIdx >= 0) {
+      var again = el.bgmList.querySelector('.bgm-btn[data-bgm="' + focusedIdx + '"]');
+      if (again) setFocus(again, true);
+    }
+    syncBgmUI();
   }
 
   function syncBgmUI() {
@@ -1500,17 +1616,19 @@
       btns[i].classList.toggle('is-playing', bgm.want && Number(btns[i].dataset.bgm) === bgm.idx);
     }
     if (el.bgmNow) {
-      el.bgmNow.textContent = bgm.want && bgm.idx >= 0
-        ? (el.bgmAudio.paused ? '按 OK 播放' : '正在播放：' + KOBE_BGM[bgm.idx].name)
+      var list = kobeBgmList();
+      el.bgmNow.textContent = bgm.want && bgm.idx >= 0 && list[bgm.idx]
+        ? (el.bgmAudio.paused ? '按 OK 播放' : '正在播放：' + list[bgm.idx].name)
         : '';
     }
   }
 
   function playBgm(i) {
-    if (!el.bgmAudio || !KOBE_BGM[i]) return;
+    var list = kobeBgmList();
+    if (!el.bgmAudio || !list[i]) return;
     bgm.idx = i;
     bgm.want = true;
-    var src = encodeURI(KOBE_BGM[i].file);
+    var src = encodeURI(list[i].src);
     if (el.bgmAudio.getAttribute('src') !== src) el.bgmAudio.setAttribute('src', src);
     var p = el.bgmAudio.play();
     // 浏览器会拦自动播放，TV WebView 允许；被拦时焦点按 OK 或点一下按钮即可
@@ -1520,7 +1638,7 @@
 
   /** 进入科比页随机放一首 */
   function startKobeBgm() {
-    playBgm(Math.floor(Math.random() * KOBE_BGM.length));
+    playBgm(Math.floor(Math.random() * kobeBgmList().length));
   }
 
   function stopKobeBgm() {
@@ -1941,8 +2059,13 @@
     window.scrollTo(0, 0);
 
     // 科比页随机播放专属 BGM，离开就停
-    if (name === 'kobe') startKobeBgm();
-    else stopKobeBgm();
+    if (name === 'kobe') {
+      startKobeBgm();
+      if (!state.kobe.dataAt || Date.now() - state.kobe.dataAt > 10 * 60 * 1000) loadKobeData();
+    } else {
+      stopKobeBgm();
+      if (state.lightboxOpen) closeKobeLightbox();
+    }
 
     // 方向键移动菜单时直接切页面，但焦点要留在菜单上
     if (keepNavFocus) {
@@ -2012,7 +2135,10 @@
         loadSchedule(state.date, true);
       }
     } else if (state.screen === 'kobe') {
-      loadKobe(true);
+      if (el.kcCount) el.kcCount.textContent = '正在更新片单…';
+      loadKobeData(true).then(function () {
+        loadKobe(true);
+      });
     } else if (state.screen === 'replay') {
       if (state.isLive) openLive(state.liveSource, state.liveTitle);
       else showReplay(state.detailId);
@@ -2033,10 +2159,10 @@
   var pendingLiveFocus = '';
 
   function kobeVideoTitle(bv) {
-    var list = KOBE_CLASSICS;
+    var list = kobeData.videoGroups || [];
     for (var i = 0; i < list.length; i++) {
       for (var j = 0; j < list[i].items.length; j++) {
-        if (list[i].items[j].id === bv) return list[i].items[j].title;
+        if (list[i].items[j].bv === bv) return list[i].items[j].title;
       }
     }
     return '科比经典视频';
@@ -2266,6 +2392,41 @@
     var target = e.target;
     if (!target || !target.closest) return;
 
+    // 图片放大预览：点背景或关闭按钮退出
+    if (state.lightboxOpen && (target === el.lightbox || target.closest('#kobe-lb-close'))) {
+      closeKobeLightbox();
+      return;
+    }
+
+    // 曼巴精神组图：点图片放大
+    var spiritCard = target.closest('[data-spirit-open]');
+    if (spiritCard) {
+      setFocus(spiritCard, true);
+      openKobeLightbox();
+      return;
+    }
+
+    // 经典视频分类跳转
+    var kcCat = target.closest('.kc-cat[data-kc-jump]');
+    if (kcCat) {
+      jumpToKobeGroup(Number(kcCat.dataset.kcJump));
+      return;
+    }
+
+    // hero / 精神图轮播圆点
+    var heroDot = target.closest('[data-hero-dot]');
+    if (heroDot) {
+      applyHeroSlide(Number(heroDot.dataset.heroDot));
+      restartHeroTimer();
+      return;
+    }
+
+    var spiritDot = target.closest('[data-spirit-dot]');
+    if (spiritDot) {
+      applySpiritSlide(Number(spiritDot.dataset.spiritDot));
+      return;
+    }
+
     // 科比经典视频卡片：直接在本页播放
     var vcard = target.closest('[data-bv]');
     if (vcard) {
@@ -2433,7 +2594,7 @@
   /** 方向键（repeat 为遥控器 / 键盘的重复事件） */
   function handleDir(dir, repeat) {
     // 作者弹框打开时，方向键不再穿透到列表
-    if (state.modalOpen) return;
+    if (state.modalOpen || state.lightboxOpen) return;
     if (state.playerFull) {
       // 直播是网页播放器，没有我们自己的快进逻辑
       if (state.isLive) return;
@@ -2447,6 +2608,10 @@
   }
 
   function handleEnter() {
+    if (state.lightboxOpen) {
+      closeKobeLightbox();
+      return;
+    }
     // 弹框里 OK 只作用于「关闭」按钮
     if (state.modalOpen) {
       activate();
@@ -2497,6 +2662,10 @@
 
   /** 返回：视频全屏时先缩小，回放页回列表，其余回上一页 */
   function handleBackKey() {
+    if (state.lightboxOpen) {
+      closeKobeLightbox();
+      return;
+    }
     if (state.modalOpen) {
       closeModal();
       return;
@@ -2786,9 +2955,10 @@
   el.schDate.value = state.date;
   initDownloadEntry();
   initWebPlayer();
-  renderKobeClassics();
-  renderMorePanel();
   renderBgm();
+  renderSpirit();
+  renderMorePanel();
+  loadKobeData();
   route();
 })();
 

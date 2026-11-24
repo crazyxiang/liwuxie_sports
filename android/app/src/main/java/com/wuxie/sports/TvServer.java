@@ -1,7 +1,12 @@
 package com.wuxie.sports;
 
+import android.content.Context;
+
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -44,6 +49,11 @@ public class TvServer {
     private static final String QQ = "https://matchweb.sports.qq.com";
     private static final String JRKAN = "https://www.jrkan77.com";
     private static final String NBA_ID = "100000";
+    // 科比页远程数据：jsDelivr 主线路，raw GitHub 备用
+    private static final String[] KOBE_DATA_URLS = {
+            "https://cdn.jsdelivr.net/gh/crazyxiang/liwuxie_sports@main/app/web/assets/data/kobe.json",
+            "https://raw.githubusercontent.com/crazyxiang/liwuxie_sports/main/app/web/assets/data/kobe.json"
+    };
     private static final String UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             + "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
@@ -79,10 +89,16 @@ public class TvServer {
     }
 
     private final int port;
+    private final Context context;
     private ServerSocket serverSocket;
 
     public TvServer(int port) {
+        this(port, null);
+    }
+
+    public TvServer(int port, Context context) {
         this.port = port;
+        this.context = context;
     }
 
     public void start() {
@@ -245,9 +261,144 @@ public class TvServer {
             if (path.equals("/api/hls")) return apiHls(qs);
             if (path.equals("/api/bili/cover")) return apiBiliCover(qs);
             if (path.equals("/api/bili/view")) return apiBiliView(qs);
+            if (path.equals("/api/kobe")) return apiKobe(qs);
             return json(404, map("error", "接口不存在"));
         } catch (Exception e) {
             return json(502, map("error", "请求失败", "detail", String.valueOf(e.getMessage())));
+        }
+    }
+
+    // ---------------- 科比页远程数据 ----------------
+
+    private static boolean kobeJsonValid(String s) {
+        return s != null && s.length() > 40
+                && s.trim().startsWith("{")
+                && s.contains("\"videoGroups\"")
+                && s.contains("\"version\"");
+    }
+
+    private Response apiKobe(Map<String, String> qs) {
+        boolean force = "1".equals(qs.get("refresh"));
+        File cacheFile = context == null ? null : new File(context.getFilesDir(), "kobe-cache.json");
+
+        if (!force && cacheFile != null && cacheFile.isFile()) {
+            String cached = readText(cacheFile);
+            if (kobeJsonValid(cached)) {
+                // 缓存过期就后台更新，页面先用旧数据，避免首屏等网络
+                if (System.currentTimeMillis() - cacheFile.lastModified() > 30 * 60 * 1000L) {
+                    refreshKobeInBackground(cacheFile);
+                }
+                return rawJson(cached);
+            }
+        }
+
+        if (force) {
+            String remote = fetchKobeRemote();
+            if (remote != null) {
+                if (cacheFile != null) writeText(cacheFile, remote);
+                return rawJson(remote);
+            }
+        }
+
+        // 远端不可达时用 APK 里打包的数据，保证离线也能看
+        String asset = readKobeAsset();
+        if (kobeJsonValid(asset)) {
+            if (cacheFile != null) writeText(cacheFile, asset);
+            // 先把页面点亮，再去后台拉最新版本
+            refreshKobeInBackground(cacheFile);
+            return rawJson(asset);
+        }
+
+        return json(502, map("error", "科比数据不可用"));
+    }
+
+    private static String fetchKobeRemote() {
+        for (String target : KOBE_DATA_URLS) {
+            try {
+                String body = fetchKobeText(target);
+                if (kobeJsonValid(body)) return body;
+            } catch (Exception ignored) {
+                // 换下一条线路
+            }
+        }
+        return null;
+    }
+
+    private static volatile boolean KOBE_REFRESHING = false;
+
+    private void refreshKobeInBackground(final File cacheFile) {
+        if (cacheFile == null || KOBE_REFRESHING) return;
+        KOBE_REFRESHING = true;
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    String remote = fetchKobeRemote();
+                    if (remote != null) writeText(cacheFile, remote);
+                } finally {
+                    KOBE_REFRESHING = false;
+                }
+            }
+        }, "kobe-refresh").start();
+    }
+
+    private String readKobeAsset() {
+        try {
+            if (context == null) return "";
+            InputStream is = context.getAssets().open("assets/data/kobe.json");
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = is.read(buf)) > 0) out.write(buf, 0, n);
+            is.close();
+            return new String(out.toByteArray(), StandardCharsets.UTF_8);
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    private static String fetchKobeText(String target) throws IOException {
+        HttpURLConnection conn = (HttpURLConnection) new URL(target).openConnection();
+        conn.setConnectTimeout(2500);
+        conn.setReadTimeout(3000);
+        conn.setInstanceFollowRedirects(true);
+        conn.setRequestProperty("User-Agent", UA);
+        conn.setRequestProperty("Cache-Control", "no-cache");
+        int code = conn.getResponseCode();
+        if (code != 200) {
+            conn.disconnect();
+            throw new IOException("HTTP " + code);
+        }
+        InputStream is = conn.getInputStream();
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] buf = new byte[8192];
+        int n;
+        while ((n = is.read(buf)) > 0) out.write(buf, 0, n);
+        is.close();
+        conn.disconnect();
+        return new String(out.toByteArray(), StandardCharsets.UTF_8);
+    }
+
+    private static String readText(File file) {
+        try {
+            FileInputStream in = new FileInputStream(file);
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            in.close();
+            return new String(out.toByteArray(), StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private static void writeText(File file, String text) {
+        try {
+            FileOutputStream out = new FileOutputStream(file);
+            out.write(text.getBytes(StandardCharsets.UTF_8));
+            out.close();
+        } catch (Exception ignored) {
         }
     }
 
@@ -1274,6 +1425,11 @@ public class TvServer {
     private static Response json(int status, Object data) {
         return new Response(status, "application/json; charset=utf-8",
                 toJson(data).getBytes(StandardCharsets.UTF_8), "no-store");
+    }
+
+    private static Response rawJson(String body) {
+        return new Response(200, "application/json; charset=utf-8",
+                body.getBytes(StandardCharsets.UTF_8), "public, max-age=600");
     }
 
     private static Map<String, Object> map(Object... kv) {

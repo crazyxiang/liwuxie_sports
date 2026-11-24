@@ -157,14 +157,19 @@
   <section class="screen kobe" id="screen-kobe" hidden>
 
     <div class="kobe-hero">
-      <img src="assets/kobe/hero.jpg" alt="Kobe Bryant">
+      <div class="kobe-hero-media" id="kobe-hero-media">
+        <div class="kh-slide is-on">
+          <img src="assets/kobe/hero.jpg" alt="Kobe Bryant">
+        </div>
+      </div>
       <div class="kobe-hero-mask"></div>
       <div class="kobe-hero-in">
         <span class="kobe-eyebrow">MY IDOL · 曼巴永恒</span>
-        <h2>Kobe Bryant</h2>
-        <p class="kobe-sub">1978.08.23 — 2020.01.26 · 8 &amp; 24 </p>
-        <p class="kobe-line">「你见过凌晨四点的洛杉矶吗？」</p>
+        <h2 id="kobe-hero-title">Kobe Bryant</h2>
+        <p class="kobe-sub" id="kobe-hero-sub">1978.08.23 — 2020.01.26 · 8 &amp; 24 </p>
+        <p class="kobe-line" id="kobe-hero-line">「你见过凌晨四点的洛杉矶吗？」</p>
       </div>
+      <div class="kobe-hero-dots" id="kobe-hero-dots" aria-label="轮播切换"></div>
     </div>
 
     <!-- 专属 BGM -->
@@ -192,11 +197,34 @@
         <h3>经典视频 · 曼巴档案</h3>
         <span class="kc-tip" id="kc-count"></span>
       </div>
+      <div class="kc-cats" id="kc-cats"></div>
       <div id="kobe-classics"></div>
       <p class="kc-hint">片源来自 B 站，由本机服务转发，点卡片直接在本页播放，不用跳转。</p>
     </div>
 
     <div class="kobe-split">
+      <figure class="kobe-card spirit-card focusable" id="spirit-card" tabindex="-1" data-spirit-open="1" title="点击放大">
+        <div class="spirit-track" id="spirit-track">
+          <div class="spirit-slide is-on"><img src="assets/kobe/spirit/1.jpg" alt="黑曼巴"></div>
+        </div>
+        <div class="spirit-dots" id="spirit-dots"></div>
+        <figcaption id="spirit-caption">Black Mamba · 曼巴精神</figcaption>
+        <span class="spirit-zoom">点击放大</span>
+      </figure>
+      <div class="kobe-copy">
+        <h3>曼巴精神</h3>
+        <p>“Mamba Mentality”不是一句口号，而是一套做事方式：每天比昨天更好一点，把每一件小事做到极致，在别人看不见的时间里默默训练。</p>
+        <div class="mamba-words">
+          <span><b>热情</b>Passion</span>
+          <span><b>执着</b>Obsession</span>
+          <span><b>严厉</b>Relentless</span>
+          <span><b>回击</b>Resilience</span>
+          <span><b>无惧</b>Fearless</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="kobe-split reverse">
       <figure class="kobe-card">
         <img src="assets/kobe/jerseys.jpg" alt="8号与24号球衣">
         <figcaption>8 &amp; 24 · 两件球衣，一座城</figcaption>
@@ -210,24 +238,6 @@
           <li><b>1,346</b> 场常规赛，18 次全明星首发</li>
           <li><b>33,643</b> 分，历史得分榜前列</li>
         </ul>
-      </div>
-    </div>
-
-    <div class="kobe-split reverse">
-      <figure class="kobe-card">
-        <img src="assets/kobe/mamba.jpg" alt="黑曼巴">
-        <figcaption>Black Mamba · 曼巴精神</figcaption>
-      </figure>
-      <div class="kobe-copy">
-        <h3>曼巴精神</h3>
-        <p>“Mamba Mentality”不是一句口号，而是一套做事方式：每天比昨天更好一点，把每一件小事做到极致，在别人看不见的时间里默默训练。</p>
-        <div class="mamba-words">
-          <span><b>热情</b>Passion</span>
-          <span><b>执着</b>Obsession</span>
-          <span><b>严厉</b>Relentless</span>
-          <span><b>回击</b>Resilience</span>
-          <span><b>无惧</b>Fearless</span>
-        </div>
       </div>
     </div>
 
@@ -270,6 +280,12 @@
     </div>
     <div class="grid" id="kobe-videos"></div>
     <p class="kobe-note" id="kobe-note" hidden></p>
+
+    <div class="kobe-lightbox" id="kobe-lightbox" hidden>
+      <button class="kobe-lb-close focusable" id="kobe-lb-close" type="button" aria-label="关闭">×</button>
+      <img id="kobe-lb-img" alt="曼巴精神">
+      <div class="kobe-lb-cap" id="kobe-lb-cap"></div>
+    </div>
 
   </section>
 
