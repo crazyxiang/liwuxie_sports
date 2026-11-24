@@ -925,12 +925,12 @@ body.player-full .glow { display: none; }
 
 .live-row {
   display: grid;
-  grid-template-columns: 100px 80px 240px 56px 240px 90px;
+  grid-template-columns: 86px 58px 100px 38px 100px 76px;
   justify-content: center;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
-  padding: 13px 18px;
+  padding: 12px 14px;
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.07);
   background: linear-gradient(160deg, #171d27, #10141b);
