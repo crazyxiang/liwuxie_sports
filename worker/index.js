@@ -24,6 +24,15 @@ const KOBE_DATA_URLS = [
   'https://raw.githubusercontent.com/crazyxiang/liwuxie_sports/main/app/web/assets/data/kobe.json'
 ];
 
+function kobeNewer(a, b) {
+  if (!a) return false;
+  if (!b) return true;
+  const av = Number(a.version) || 0;
+  const bv = Number(b.version) || 0;
+  if (av !== bv) return av > bv;
+  return String(a.updatedAt || '') > String(b.updatedAt || '');
+}
+
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET,OPTIONS',
@@ -755,26 +764,40 @@ async function handleApi(url, request, env, ctx) {
     const force = url.searchParams.get('refresh') === '1';
     try {
       return await cachedJson(new Request(`${url.origin}/api/kobe`), force ? 1 : 1800, async () => {
+        let best = null;
         for (const src of KOBE_DATA_URLS) {
           try {
             const r = await fetch(src, {
               headers: { 'User-Agent': UA, 'Cache-Control': 'no-cache' },
+              signal: AbortSignal.timeout(4500),
               cf: { cacheTtl: 300 }
             });
             if (!r.ok) continue;
             const data = await r.json();
-            if (data && Array.isArray(data.videoGroups) && data.videoGroups.length) return data;
+            if (data && Array.isArray(data.videoGroups) && data.videoGroups.length) {
+              if (!best || kobeNewer(data, best)) best = data;
+            }
           } catch {
             /* 换下一条线路 */
           }
         }
-        // 远端都拿不到时回落到打包在站点里的默认数据
+
+        // 远端都拿不到、或站点内置数据更新时，回落到打包数据
         if (env && env.ASSETS) {
           const local = await env.ASSETS.fetch(new Request(`${url.origin}/assets/data/kobe.json`));
-          if (local.ok) return await local.json();
+          if (local.ok) {
+            const data = await local.json();
+            if (Array.isArray(data.videoGroups) && data.videoGroups.length && kobeNewer(data, best)) best = data;
+          }
         }
-        const local2 = await fetch(new URL('/assets/data/kobe.json', url.origin).toString());
-        if (local2.ok) return await local2.json();
+        if (!best) {
+          const local2 = await fetch(new URL('/assets/data/kobe.json', url.origin).toString());
+          if (local2.ok) {
+            const data = await local2.json();
+            if (Array.isArray(data.videoGroups) && data.videoGroups.length) best = data;
+          }
+        }
+        if (best) return best;
         throw new Error('科比数据不可用');
       }, { ctx, force });
     } catch (err) {

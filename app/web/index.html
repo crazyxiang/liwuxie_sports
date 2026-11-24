@@ -282,15 +282,6 @@
     <div class="grid" id="kobe-videos"></div>
     <p class="kobe-note" id="kobe-note" hidden></p>
 
-    <div class="kobe-lightbox" id="kobe-lightbox" hidden>
-      <button class="kobe-lb-close focusable" id="kobe-lb-close" type="button" aria-label="关闭">×</button>
-      <button class="kobe-lb-nav kobe-lb-prev" id="kobe-lb-prev" type="button" aria-label="上一张">‹</button>
-      <img id="kobe-lb-img" alt="曼巴精神">
-      <button class="kobe-lb-nav kobe-lb-next" id="kobe-lb-next" type="button" aria-label="下一张">›</button>
-      <div class="kobe-lb-count" id="kobe-lb-count"></div>
-      <div class="kobe-lb-cap" id="kobe-lb-cap"></div>
-    </div>
-
   </section>
 
   <!-- 播放页 -->
@@ -320,6 +311,16 @@
     </div>
   </section>
 </main>
+
+  <!-- 曼巴精神放大层：放在 main 外，避免被顶栏层级压住 -->
+  <div class="kobe-lightbox" id="kobe-lightbox" hidden>
+    <button class="kobe-lb-close focusable" id="kobe-lb-close" type="button" aria-label="关闭">×</button>
+    <button class="kobe-lb-nav kobe-lb-prev" id="kobe-lb-prev" type="button" aria-label="上一张">‹</button>
+    <img id="kobe-lb-img" alt="曼巴精神">
+    <button class="kobe-lb-nav kobe-lb-next" id="kobe-lb-next" type="button" aria-label="下一张">›</button>
+    <div class="kobe-lb-count" id="kobe-lb-count"></div>
+    <div class="kobe-lb-cap" id="kobe-lb-cap"></div>
+  </div>
 
 <script src="assets/vendor/hls.min.js"></script>
 <script src="assets/js/app.js"></script>

@@ -277,31 +277,52 @@ public class TvServer {
                 && s.contains("\"version\"");
     }
 
+    private static int kobeVersion(String s) {
+        if (s == null) return -1;
+        Matcher m = Pattern.compile("\"version\"\\s*:\\s*(\\d+)").matcher(s);
+        return m.find() ? Integer.parseInt(m.group(1)) : 0;
+    }
+
+    private static String kobeUpdatedAt(String s) {
+        if (s == null) return "";
+        Matcher m = Pattern.compile("\"updatedAt\"\\s*:\\s*\"([^\"]+)\"").matcher(s);
+        return m.find() ? m.group(1) : "";
+    }
+
+    /** 远端数据是否比 base 新；版本号优先，版本相同再比 updatedAt */
+    private static boolean kobeNewer(String next, String base) {
+        if (next == null || !kobeJsonValid(next)) return false;
+        if (base == null || !kobeJsonValid(base)) return true;
+        int nv = kobeVersion(next);
+        int bv = kobeVersion(base);
+        if (nv != bv) return nv > bv;
+        return kobeUpdatedAt(next).compareTo(kobeUpdatedAt(base)) > 0;
+    }
+
     private Response apiKobe(Map<String, String> qs) {
         boolean force = "1".equals(qs.get("refresh"));
         File cacheFile = context == null ? null : new File(context.getFilesDir(), "kobe-cache.json");
+        String asset = readKobeAsset();
+        String cached = cacheFile != null && cacheFile.isFile() ? readText(cacheFile) : null;
+        String base = kobeNewer(asset, cached) ? asset : cached;
 
-        if (!force && cacheFile != null && cacheFile.isFile()) {
-            String cached = readText(cacheFile);
-            if (kobeJsonValid(cached)) {
-                // 缓存过期就后台更新，页面先用旧数据，避免首屏等网络
-                if (System.currentTimeMillis() - cacheFile.lastModified() > 30 * 60 * 1000L) {
-                    refreshKobeInBackground(cacheFile);
-                }
-                return rawJson(cached);
+        if (!force && kobeJsonValid(cached) && !kobeNewer(asset, cached)) {
+            // 缓存过期就后台更新，页面先用旧数据，避免首屏等网络
+            if (System.currentTimeMillis() - cacheFile.lastModified() > 30 * 60 * 1000L) {
+                refreshKobeInBackground(cacheFile);
             }
+            return rawJson(cached);
         }
 
         if (force) {
             String remote = fetchKobeRemote();
-            if (remote != null) {
+            if (remote != null && kobeVersion(remote) >= kobeVersion(base)) {
                 if (cacheFile != null) writeText(cacheFile, remote);
                 return rawJson(remote);
             }
         }
 
         // 远端不可达时用 APK 里打包的数据，保证离线也能看
-        String asset = readKobeAsset();
         if (kobeJsonValid(asset)) {
             if (cacheFile != null) writeText(cacheFile, asset);
             // 先把页面点亮，再去后台拉最新版本
@@ -309,19 +330,22 @@ public class TvServer {
             return rawJson(asset);
         }
 
+        if (kobeJsonValid(cached)) return rawJson(cached);
         return json(502, map("error", "科比数据不可用"));
     }
 
+    /** 两条线路都拉，选版本号最大的，避免 CDN 旧缓存盖掉 GitHub 新数据 */
     private static String fetchKobeRemote() {
+        String best = null;
         for (String target : KOBE_DATA_URLS) {
             try {
                 String body = fetchKobeText(target);
-                if (kobeJsonValid(body)) return body;
+                if (kobeJsonValid(body) && (best == null || kobeNewer(body, best))) best = body;
             } catch (Exception ignored) {
                 // 换下一条线路
             }
         }
-        return null;
+        return best;
     }
 
     private static volatile boolean KOBE_REFRESHING = false;
@@ -333,8 +357,9 @@ public class TvServer {
             @Override
             public void run() {
                 try {
+                    String current = readText(cacheFile);
                     String remote = fetchKobeRemote();
-                    if (remote != null) writeText(cacheFile, remote);
+                    if (remote != null && kobeNewer(remote, current)) writeText(cacheFile, remote);
                 } finally {
                     KOBE_REFRESHING = false;
                 }

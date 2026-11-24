@@ -677,7 +677,17 @@ function kobeJsonValid(data) {
   return data && typeof data === 'object' && Array.isArray(data.videoGroups) && data.videoGroups.length > 0;
 }
 
-async function refreshKobeCache() {
+function kobeNewer(a, b) {
+  if (!a) return false;
+  if (!b) return true;
+  const av = Number(a.version) || 0;
+  const bv = Number(b.version) || 0;
+  if (av !== bv) return av > bv;
+  return String(a.updatedAt || '') > String(b.updatedAt || '');
+}
+
+async function refreshKobeCache(base) {
+  let best = null;
   for (const src of KOBE_DATA_URLS) {
     try {
       const r = await fetch(src, {
@@ -687,11 +697,20 @@ async function refreshKobeCache() {
       if (!r.ok) continue;
       const data = await r.json();
       if (!kobeJsonValid(data)) continue;
-      writeDisk('kobe-remote', { at: Date.now(), data });
-      return data;
+      // 只认比当前缓存/内置数据新的版本，避免 CDN 旧缓存盖掉新数据
+      if (base && !kobeNewer(data, base)) continue;
+      if (kobeNewer(data, base)) {
+        best = data;
+        break;
+      }
+      if (!best || kobeNewer(data, best)) best = data;
     } catch {
       /* 换下一条线路 */
     }
+  }
+  if (best) {
+    writeDisk('kobe-remote', { at: Date.now(), data: best });
+    return best;
   }
   return null;
 }
@@ -699,29 +718,35 @@ async function refreshKobeCache() {
 async function handleKobe(req, res, url) {
   const force = url.searchParams.get('refresh') === '1';
   const bundled = path.join(ROOT, 'assets/data/kobe.json');
+  let bundledData = null;
+  try {
+    bundledData = JSON.parse(fs.readFileSync(bundled, 'utf8'));
+  } catch {
+    bundledData = null;
+  }
   const entry = readDisk('kobe-remote');
+  const base = kobeNewer(bundledData, entry && entry.data) ? bundledData : (entry && entry.data) || bundledData;
 
-  if (!force && entry && kobeJsonValid(entry.data)) {
+  if (!force && entry && kobeJsonValid(entry.data) && !kobeNewer(bundledData, entry.data)) {
     // 命中缓存立即返回，过期了再在后台更新，绝不拖慢首屏
-    if (Date.now() - entry.at > 30 * 60 * 1000) refreshKobeCache();
+    if (Date.now() - entry.at > 30 * 60 * 1000) refreshKobeCache(base);
     return json(res, 200, entry.data);
   }
 
   if (force) {
-    const remote = await refreshKobeCache();
+    const remote = await refreshKobeCache(base);
     if (remote) return json(res, 200, remote);
   }
 
-  try {
-    const data = JSON.parse(fs.readFileSync(bundled, 'utf8'));
+  if (bundledData && kobeJsonValid(bundledData)) {
     // 先给本地打包数据，远端结果后台补进来
-    writeDisk('kobe-remote', { at: Date.now(), data });
-    refreshKobeCache();
-    return json(res, 200, data);
-  } catch (err) {
-    if (entry && kobeJsonValid(entry.data)) return json(res, 200, entry.data);
-    return json(res, 502, { error: '科比数据不可用', detail: String(err.message || err) });
+    writeDisk('kobe-remote', { at: Date.now(), data: bundledData });
+    refreshKobeCache(base);
+    return json(res, 200, bundledData);
   }
+
+  if (entry && kobeJsonValid(entry.data)) return json(res, 200, entry.data);
+  return json(res, 502, { error: '科比数据不可用', detail: '本地与远端都没有有效数据' });
 }
 
 async function handleApi(req, res, url) {
