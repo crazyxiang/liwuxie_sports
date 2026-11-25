@@ -35,8 +35,8 @@ function kobeNewer(a, b) {
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET,OPTIONS',
-  'Access-Control-Allow-Headers': '*'
+  'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type,X-Admin-Token'
 };
 
 // Cache API 在本地 Node 自测时不存在，做个兜底
@@ -757,9 +757,77 @@ async function handleBiliCover(url) {
   return res;
 }
 
+// ---------------- 致敬曼巴（KV 计数） ----------------
+
+async function sha256Hex(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(text)));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function tributeDevice(raw) {
+  const id = String(raw || '').trim();
+  return /^[A-Za-z0-9_-]{16,64}$/.test(id) ? id : '';
+}
+
+async function handleTribute(request, url, env) {
+  const kv = env && env.TRIBUTE;
+  if (!kv) {
+    return json({ error: '致敬计数未配置', detail: '请先在 Cloudflare 创建 KV 命名空间并绑定 TRIBUTE' }, 503);
+  }
+
+  let payload = {};
+  if (request.method === 'POST') {
+    try { payload = await request.json(); } catch { payload = {}; }
+  }
+  const id = tributeDevice(url.searchParams.get('device') || (payload && payload.deviceId));
+  if (!id) return json({ error: 'device 不合法' }, 400);
+
+  const hash = await sha256Hex(id);
+  const key = 'd:' + hash;
+  const count = Number(await kv.get('total')) || 0;
+  const entry = await kv.get(key, 'json');
+
+  if (request.method === 'POST') {
+    if (!entry) {
+      const rank = count + 1;
+      const now = new Date().toISOString();
+      await kv.put(key, JSON.stringify({ at: now, rank }));
+      await kv.put('total', String(rank));
+      await kv.put('updatedAt', now);
+      try {
+        const recent = (await kv.get('recent', 'json')) || [];
+        recent.unshift({ id: hash.slice(0, 8), at: now, rank });
+        await kv.put('recent', JSON.stringify(recent.slice(0, 50)));
+      } catch { /* 后台日志写失败不影响打卡 */ }
+      return json({ count: rank, mine: true, rank, added: true });
+    }
+    return json({ count, mine: true, rank: entry.rank || 0, added: false });
+  }
+
+  if (request.method !== 'GET') return json({ error: '只支持 GET / POST' }, 405);
+  return json({ count, mine: !!entry, rank: entry ? entry.rank || 0 : 0 });
+}
+
+async function handleTributeStats(request, url, env) {
+  const need = env && env.ADMIN_TOKEN;
+  if (!need) return json({ error: '后台未设置 ADMIN_TOKEN' }, 503);
+  const got = request.headers.get('X-Admin-Token') || url.searchParams.get('token') || '';
+  if (got !== need) return json({ error: '后台口令不正确' }, 403);
+
+  const kv = env && env.TRIBUTE;
+  if (!kv) return json({ error: 'KV 未绑定' }, 503);
+  const count = Number(await kv.get('total')) || 0;
+  const updatedAt = (await kv.get('updatedAt')) || '';
+  const recent = (await kv.get('recent', 'json')) || [];
+  return json({ count, updatedAt, recent });
+}
+
 // ---------------- 路由 ----------------
 
 async function handleApi(url, request, env, ctx) {
+  if (url.pathname === '/api/tribute') return handleTribute(request, url, env);
+  if (url.pathname === '/api/tribute/stats') return handleTributeStats(request, url, env);
+
   if (url.pathname === '/api/kobe') {
     const force = url.searchParams.get('refresh') === '1';
     try {

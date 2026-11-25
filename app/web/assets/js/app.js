@@ -74,6 +74,8 @@
     liveLines: [],
     // 科比专栏
     kobe: { loaded: false, loading: false, items: [], dataAt: 0 },
+    // 致敬曼巴打卡
+    tribute: { loaded: false, loading: false, mine: false, pending: false, rank: 0, count: null },
     // 直播（默认选中 NBA）
     live: { loaded: false, loading: false, filter: 'NBA', items: [] },
     // 作者微信弹框
@@ -167,6 +169,13 @@
     heroTitle: document.getElementById('kobe-hero-title'),
     heroSub: document.getElementById('kobe-hero-sub'),
     heroLine: document.getElementById('kobe-hero-line'),
+    tribute: document.getElementById('kobe-tribute'),
+    ktTitle: document.getElementById('kt-title'),
+    ktDesc: document.getElementById('kt-desc'),
+    ktCount: document.getElementById('kt-count'),
+    ktBtn: document.getElementById('kt-btn'),
+    ktLabel: document.getElementById('kt-label'),
+    ktNote: document.getElementById('kt-note'),
     spiritCard: document.getElementById('spirit-card'),
     spiritTrack: document.getElementById('spirit-track'),
     spiritDots: document.getElementById('spirit-dots'),
@@ -1624,6 +1633,13 @@
   // 内置兜底：即使 /api/kobe 拿不到，页面也不会空着
   var KOBE_DEFAULT = {
     version: 0,
+    tribute: {
+      enabled: true,
+      api: '',
+      title: '致敬曼巴',
+      desc: '点亮一盏灯，把想说的话留在斯台普斯。',
+      note: '按一下，点亮属于你的一盏灯'
+    },
     hero: {
       interval: 5000,
       slides: [
@@ -1649,6 +1665,13 @@
     return {
       version: raw.version || 0,
       updatedAt: raw.updatedAt || '',
+      tribute: {
+        enabled: !raw.tribute || raw.tribute.enabled !== false,
+        api: String((raw.tribute && raw.tribute.api) || ''),
+        title: String((raw.tribute && raw.tribute.title) || '致敬曼巴'),
+        desc: String((raw.tribute && raw.tribute.desc) || '点亮一盏灯，把想说的话留在斯台普斯。'),
+        note: String((raw.tribute && raw.tribute.note) || '按一下，点亮属于你的一盏灯')
+      },
       hero: {
         interval: Math.max(2500, Number(raw.hero && raw.hero.interval) || 5000),
         slides: (raw.hero && raw.hero.slides || []).map(function (s) {
@@ -1706,6 +1729,7 @@
         renderKobeHero();
         renderBgm();
         renderSpirit();
+        applyTributeConfig(true);
         renderKobeClassics();
         kobeDataReq = null;
         return kobeData;
@@ -1717,6 +1741,266 @@
         return kobeData;
       });
     return kobeDataReq;
+  }
+
+  // ---------------- 致敬曼巴（匿名打卡） ----------------
+
+  var TRIBUTE_DEVICE_KEY = 'wx_tribute_device_v1';
+  var TRIBUTE_CACHE_KEY = 'wx_tribute_cache_v1';
+  var tributeDevice = '';
+  var tributeReq = null;
+  var tributeApiCache = null;
+  var tributeAt = 0;
+
+  function tributeCfg() {
+    return (kobeData && kobeData.tribute) || KOBE_DEFAULT.tribute;
+  }
+
+  function ensureTributeDevice() {
+    if (tributeDevice) return tributeDevice;
+    try {
+      var saved = localStorage.getItem(TRIBUTE_DEVICE_KEY);
+      if (saved && /^[A-Za-z0-9_-]{16,64}$/.test(saved)) {
+        tributeDevice = saved;
+        return tributeDevice;
+      }
+    } catch (err) { /* 隐私模式可能禁用存储 */ }
+
+    var rnd = '';
+    try {
+      if (window.crypto && crypto.getRandomValues) {
+        var buf = new Uint8Array(16);
+        crypto.getRandomValues(buf);
+        for (var i = 0; i < buf.length; i++) rnd += ('0' + buf[i].toString(16)).slice(-2);
+      }
+    } catch (err2) { /* 老 WebView 没有 crypto */ }
+    if (!rnd) rnd = String(Date.now()) + Math.random().toString(36).slice(2, 12);
+    tributeDevice = 'd' + rnd.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40);
+
+    try { localStorage.setItem(TRIBUTE_DEVICE_KEY, tributeDevice); } catch (err3) { /* 忽略 */ }
+    return tributeDevice;
+  }
+
+  function readTributeCache() {
+    try {
+      var raw = JSON.parse(localStorage.getItem(TRIBUTE_CACHE_KEY) || '{}');
+      return raw && typeof raw === 'object' ? raw : {};
+    } catch (err) {
+      return {};
+    }
+  }
+
+  function writeTributeCache(patch) {
+    var cache = readTributeCache();
+    for (var k in patch) {
+      if (Object.prototype.hasOwnProperty.call(patch, k)) cache[k] = patch[k];
+    }
+    cache.deviceId = ensureTributeDevice();
+    cache.at = Date.now();
+    try { localStorage.setItem(TRIBUTE_CACHE_KEY, JSON.stringify(cache)); } catch (err) { /* 忽略 */ }
+    return cache;
+  }
+
+  function fmtTributeCount(n) {
+    var v = Number(n);
+    if (!isFinite(v) || v < 0) return '—';
+    try { return v.toLocaleString('zh-CN'); } catch (err) { return String(v); }
+  }
+
+  function tributeApiUrl() {
+    var base = String(tributeCfg().api || '').trim();
+    if (!base) return api('/api/tribute');
+    if (/^https?:\/\//i.test(base)) return base;
+    return api(base.charAt(0) === '/' ? base : '/' + base);
+  }
+
+  function withTributeDevice(url) {
+    var device = ensureTributeDevice();
+    return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'device=' + encodeURIComponent(device);
+  }
+
+  function applyTributeConfig(force) {
+    if (!el.tribute) return;
+    var cfg = tributeCfg();
+    el.tribute.hidden = cfg.enabled === false;
+    if (cfg.enabled === false) return;
+    if (el.ktTitle) el.ktTitle.textContent = cfg.title;
+    if (el.ktDesc) el.ktDesc.textContent = cfg.desc;
+
+    var apiNow = String(cfg.api || '');
+    var apiChanged = tributeApiCache !== null && apiNow !== tributeApiCache;
+    tributeApiCache = apiNow;
+    if (apiChanged || !state.tribute.loaded) {
+      loadTributeCount(true);
+    }
+  }
+
+  function paintTribute() {
+    if (!el.ktBtn) return;
+    var c = state.tribute;
+    el.ktCount.textContent = fmtTributeCount(c.count);
+    el.ktBtn.classList.toggle('is-done', !!c.mine);
+    el.ktBtn.classList.toggle('is-loading', !!c.loading);
+    el.ktBtn.setAttribute('aria-busy', c.loading ? 'true' : 'false');
+    el.ktBtn.setAttribute('aria-pressed', c.mine ? 'true' : 'false');
+
+    if (c.loading) {
+      el.ktLabel.textContent = '致敬中…';
+      el.ktNote.textContent = '正在把这一下写进曼巴的墙';
+      el.ktNote.className = 'kt-note';
+      return;
+    }
+    if (c.mine) {
+      el.ktLabel.textContent = '已致敬';
+      el.ktNote.textContent = c.pending
+        ? '本机已记录 · 联网后自动同步'
+        : (c.rank ? '你是第 ' + fmtTributeCount(c.rank) + ' 位致敬者' : '你已经致敬过曼巴');
+      el.ktNote.className = 'kt-note is-ok';
+      return;
+    }
+    el.ktLabel.textContent = '致敬曼巴';
+    el.ktNote.textContent = tributeCfg().note;
+    el.ktNote.className = 'kt-note';
+  }
+
+  function applyTributePayload(data, pop) {
+    var count = Number(data && data.count);
+    state.tribute.count = isFinite(count) && count >= 0 ? count : state.tribute.count;
+    state.tribute.mine = !!(data && data.mine);
+    state.tribute.pending = false;
+    state.tribute.rank = Number(data && data.rank) || 0;
+    state.tribute.loaded = true;
+    state.tribute.loading = false;
+    tributeAt = Date.now();
+    writeTributeCache({
+      count: state.tribute.count,
+      mine: state.tribute.mine,
+      rank: state.tribute.rank,
+      pending: false
+    });
+    paintTribute();
+
+    if (pop && el.ktBtn) {
+      el.ktBtn.classList.remove('is-pop');
+      void el.ktBtn.offsetWidth;
+      el.ktBtn.classList.add('is-pop');
+      setTimeout(function () { el.ktBtn.classList.remove('is-pop'); }, 900);
+    }
+  }
+
+  function loadTributeCount(force) {
+    if (!el.tribute || tributeCfg().enabled === false) return null;
+    if (tributeReq && !force) return tributeReq;
+    if (!force && state.tribute.loaded && Date.now() - tributeAt < 60 * 1000) return null;
+
+    ensureTributeDevice();
+    var cached = readTributeCache();
+    if (typeof cached.count === 'number' && cached.count >= 0) state.tribute.count = cached.count;
+    state.tribute.mine = !!cached.mine;
+    state.tribute.pending = !!cached.pending;
+    state.tribute.rank = Number(cached.rank) || 0;
+    paintTribute();
+
+    var url = withTributeDevice(tributeApiUrl());
+    var body = JSON.stringify({ deviceId: ensureTributeDevice() });
+    var opts = state.tribute.pending
+      ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body, cache: 'no-store' }
+      : { cache: 'no-store' };
+
+    tributeReq = fetch(url, opts)
+      .then(function (res) {
+        return res.text().then(function (text) {
+          var data;
+          try { data = JSON.parse(text); } catch (err) { throw new Error('接口返回不正常'); }
+          if (!res.ok || !data || data.error) throw new Error((data && (data.detail || data.error)) || ('HTTP ' + res.status));
+          return data;
+        });
+      })
+      .then(function (data) {
+        tributeReq = null;
+        applyTributePayload(data, false);
+        return state.tribute;
+      })
+      .catch(function (err) {
+        tributeReq = null;
+        state.tribute.loading = false;
+        paintTribute();
+        if (el.ktNote && !state.tribute.mine) {
+          el.ktNote.textContent = '致敬服务连接中，先按一下也能留下记录';
+          el.ktNote.className = 'kt-note';
+        }
+        return state.tribute;
+      });
+    return tributeReq;
+  }
+
+  function sendTribute() {
+    if (!el.ktBtn || state.tribute.loading) return;
+    if (state.tribute.mine && !state.tribute.pending) {
+      el.ktNote.textContent = '你已经致敬过曼巴了 · 第 ' + fmtTributeCount(state.tribute.rank || 1) + ' 位';
+      el.ktNote.className = 'kt-note is-ok';
+      el.ktBtn.classList.remove('is-pop');
+      void el.ktBtn.offsetWidth;
+      el.ktBtn.classList.add('is-pop');
+      setTimeout(function () { el.ktBtn.classList.remove('is-pop'); }, 900);
+      return;
+    }
+
+    ensureTributeDevice();
+    state.tribute.loading = true;
+    paintTribute();
+
+    var url = withTributeDevice(tributeApiUrl());
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceId: ensureTributeDevice() }),
+      cache: 'no-store'
+    })
+      .then(function (res) {
+        return res.text().then(function (text) {
+          var data;
+          try { data = JSON.parse(text); } catch (err) { throw new Error('接口返回不正常'); }
+          if (!res.ok || !data || data.error) throw new Error((data && (data.detail || data.error)) || ('HTTP ' + res.status));
+          return data;
+        });
+      })
+      .then(function (data) {
+        applyTributePayload(data, true);
+      })
+      .catch(function () {
+        // 离线时先记在本机，下次打开会自动补传；不影响按钮手感
+        var cached = readTributeCache();
+        var next = (typeof cached.count === 'number' ? cached.count : 0) + 1;
+        state.tribute.count = next;
+        state.tribute.mine = true;
+        state.tribute.pending = true;
+        state.tribute.rank = next;
+        state.tribute.loading = false;
+        state.tribute.loaded = false;
+        writeTributeCache({ count: next, mine: true, rank: next, pending: true });
+        paintTribute();
+        el.ktNote.textContent = '本机已致敬 · 联网后会自动同步';
+        el.ktNote.className = 'kt-note is-ok';
+        if (el.ktBtn) {
+          el.ktBtn.classList.remove('is-pop');
+          void el.ktBtn.offsetWidth;
+          el.ktBtn.classList.add('is-pop');
+          setTimeout(function () { el.ktBtn.classList.remove('is-pop'); }, 900);
+        }
+      });
+  }
+
+  function initTribute() {
+    if (!el.tribute) return;
+    ensureTributeDevice();
+    var cached = readTributeCache();
+    if (typeof cached.count === 'number') state.tribute.count = cached.count;
+    state.tribute.mine = !!cached.mine;
+    state.tribute.pending = !!cached.pending;
+    state.tribute.rank = Number(cached.rank) || 0;
+    paintTribute();
+    applyTributeConfig(true);
   }
 
 
@@ -2351,6 +2635,7 @@
     if (name === 'kobe') {
       startKobeBgm();
       if (!state.kobe.dataAt || Date.now() - state.kobe.dataAt > 10 * 60 * 1000) loadKobeData();
+      loadTributeCount();
     } else {
       stopKobeBgm();
       if (state.lightboxOpen) closeKobeLightbox();
@@ -2697,6 +2982,14 @@
       if (target === el.lightbox || target.closest('#kobe-lb-close')) {
         closeKobeLightbox();
       }
+      return;
+    }
+
+    // 致敬曼巴：匿名打卡按钮
+    var tributeBtn = target.closest('#kt-btn');
+    if (tributeBtn) {
+      setFocus(tributeBtn, true);
+      sendTribute();
       return;
     }
 
@@ -3265,6 +3558,7 @@
   renderBgm();
   renderSpirit();
   bindKobeGestures();
+  initTribute();
   renderMorePanel();
   loadKobeData();
   route();

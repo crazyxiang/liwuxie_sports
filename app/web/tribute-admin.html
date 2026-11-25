@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>致敬曼巴 · 后台</title>
+<style>
+  :root {
+    --gold: #fdb927;
+    --purple: #552583;
+    --ink: #0d0914;
+    --card: rgba(31, 21, 45, .86);
+    --line: rgba(253, 185, 39, .18);
+    --muted: #a08cc0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    padding: 40px 20px 60px;
+    color: #f3ecff;
+    font-family: "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+    background:
+      radial-gradient(900px 500px at 10% 0%, rgba(253, 185, 39, .11), transparent 65%),
+      radial-gradient(900px 600px at 100% 100%, rgba(85, 37, 131, .38), transparent 68%),
+      #0d0914;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  .top { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; margin-bottom: 24px; }
+  .eyebrow { font-size: 11px; letter-spacing: 3px; color: rgba(253, 185, 39, .78); font-weight: 700; }
+  h1 { margin: 8px 0 0; font-size: clamp(26px, 4vw, 40px); line-height: 1.1; letter-spacing: 2px; }
+  .sub { margin: 9px 0 0; color: var(--muted); font-size: 13px; }
+  .ghost {
+    border: 1px solid rgba(255, 255, 255, .16);
+    background: rgba(255, 255, 255, .06);
+    color: #e9dcff;
+    border-radius: 999px;
+    padding: 10px 18px;
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .ghost:hover { border-color: rgba(253, 185, 39, .45); color: var(--gold); }
+  .card {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 22px;
+    background: var(--card);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, .45);
+  }
+  .card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(520px 240px at 12% 0%, rgba(253, 185, 39, .13), transparent 68%);
+  }
+  .stat { position: relative; padding: 32px 34px 26px; }
+  .stat-label { font-size: 12px; letter-spacing: 2px; color: var(--muted); }
+  #count {
+    margin-top: 6px;
+    font-size: clamp(56px, 12vw, 92px);
+    line-height: .95;
+    font-weight: 900;
+    color: var(--gold);
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 0 46px rgba(253, 185, 39, .18);
+  }
+  #updated { margin-top: 12px; font-size: 12px; color: #8e7bab; }
+  .login {
+    position: relative;
+    display: flex;
+    gap: 10px;
+    padding: 20px 34px 28px;
+    border-top: 1px solid rgba(255, 255, 255, .06);
+    flex-wrap: wrap;
+  }
+  input {
+    flex: 1 1 240px;
+    min-width: 0;
+    padding: 12px 16px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, .12);
+    background: rgba(8, 5, 13, .72);
+    color: #fff;
+    font: inherit;
+    font-size: 14px;
+    outline: none;
+  }
+  input:focus { border-color: rgba(253, 185, 39, .5); box-shadow: 0 0 0 3px rgba(253, 185, 39, .12); }
+  .primary {
+    border: 0;
+    border-radius: 12px;
+    padding: 12px 22px;
+    background: linear-gradient(135deg, #fdd34a, #e79b1f);
+    color: #1d1208;
+    font: inherit;
+    font-weight: 800;
+    cursor: pointer;
+  }
+  .primary:hover { filter: brightness(1.05); }
+  .msg { flex-basis: 100%; min-height: 18px; font-size: 12.5px; color: #ff9a7a; }
+  .msg.ok { color: #8fe3b0; }
+  .list-head { display: flex; align-items: baseline; justify-content: space-between; margin: 28px 2px 10px; }
+  .list-head h2 { margin: 0; font-size: 16px; letter-spacing: 1px; }
+  .list-head span { font-size: 12px; color: var(--muted); }
+  .table-card { padding: 8px 18px 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 11px 8px; border-bottom: 1px solid rgba(255, 255, 255, .055); }
+  th { color: #8e7bab; font-weight: 500; font-size: 11.5px; letter-spacing: 1px; }
+  td { color: #ded2f2; }
+  tbody tr:last-child td { border-bottom: 0; }
+  .rank { color: var(--gold); font-weight: 800; width: 70px; }
+  .empty { padding: 26px 8px; color: var(--muted); font-size: 13px; }
+  .foot { margin-top: 18px; color: #6f6188; font-size: 11.5px; line-height: 1.8; }
+  @media (max-width: 620px) {
+    body { padding: 24px 14px 40px; }
+    .top { align-items: flex-start; flex-direction: column; }
+    .stat { padding: 26px 22px 22px; }
+    .login { padding: 18px 22px 24px; }
+    .table-card { padding: 6px 12px 10px; }
+    .rank { width: 54px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div>
+      <div class="eyebrow">MAMBA FOREVER · ADMIN</div>
+      <h1>致敬曼巴 · 后台</h1>
+      <p class="sub">匿名设备计数，不收集姓名、手机号或位置。一次设备记一次。</p>
+    </div>
+    <button class="ghost" id="refresh" type="button">刷新数据</button>
+  </div>
+
+  <div class="card">
+    <div class="stat">
+      <div class="stat-label">累计致敬人数</div>
+      <div id="count">—</div>
+      <div id="updated">输入后台口令后查看</div>
+    </div>
+    <div class="login">
+      <input id="token" type="password" placeholder="后台口令（Cloudflare ADMIN_TOKEN）" autocomplete="current-password">
+      <button class="primary" id="enter" type="button">进入后台</button>
+      <div class="msg" id="msg"></div>
+    </div>
+  </div>
+
+  <div class="list-head">
+    <h2>最近打卡</h2>
+    <span id="deviceCount"></span>
+  </div>
+  <div class="card table-card">
+    <table>
+      <thead><tr><th>序号</th><th>时间</th><th>设备标记</th></tr></thead>
+      <tbody id="rows"><tr><td colspan="3" class="empty">还没有数据，或还没有验证口令。</td></tr></tbody>
+    </table>
+  </div>
+
+  <p class="foot">数据存在 Cloudflare KV：total 为总人数，d:* 为每台设备的匿名哈希。清理测试数据时，在 Cloudflare 控制台删除对应 key 即可。</p>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var countEl = document.getElementById('count');
+  var updatedEl = document.getElementById('updated');
+  var rowsEl = document.getElementById('rows');
+  var msgEl = document.getElementById('msg');
+  var tokenEl = document.getElementById('token');
+  var deviceCountEl = document.getElementById('deviceCount');
+
+  function fmtTime(s) {
+    if (!s) return '—';
+    var d = new Date(s);
+    if (isNaN(d.getTime())) return s;
+    return d.toLocaleString('zh-CN', { hour12: false });
+  }
+
+  function msg(text, ok) {
+    msgEl.textContent = text || '';
+    msgEl.className = 'msg' + (ok ? ' ok' : '');
+  }
+
+  function load() {
+    var token = tokenEl.value.trim();
+    msg('正在读取…', true);
+    fetch('/api/tribute/stats', { headers: { 'X-Admin-Token': token }, cache: 'no-store' })
+      .then(function (res) {
+        return res.text().then(function (text) {
+          var data;
+          try { data = JSON.parse(text); } catch (err) { throw new Error('返回内容不是 JSON'); }
+          if (!res.ok || !data || data.error) throw new Error((data && (data.detail || data.error)) || ('HTTP ' + res.status));
+          return data;
+        });
+      })
+      .then(function (data) {
+        countEl.textContent = Number(data.count || 0).toLocaleString('zh-CN');
+        updatedEl.textContent = '最近更新：' + fmtTime(data.updatedAt);
+        deviceCountEl.textContent = data.recent && data.recent.length ? '显示最近 ' + data.recent.length + ' 条' : '';
+        if (!data.recent || !data.recent.length) {
+          rowsEl.innerHTML = '<tr><td colspan="3" class="empty">还没有人打卡。</td></tr>';
+        } else {
+          rowsEl.innerHTML = data.recent.map(function (it, i) {
+            return '<tr><td class="rank">#' + (it.rank || '—') + '</td><td>' + fmtTime(it.at) +
+              '</td><td><code>' + String(it.id || '').replace(/[<>&]/g, '') + '</code></td></tr>';
+          }).join('');
+        }
+        msg('已更新', true);
+        try { sessionStorage.setItem('wx_tribute_admin_token', token); } catch (err) { /* 忽略 */ }
+      })
+      .catch(function (err) {
+        countEl.textContent = '—';
+        updatedEl.textContent = '读取失败';
+        msg(err.message || '读取失败');
+      });
+  }
+
+  document.getElementById('enter').addEventListener('click', load);
+  document.getElementById('refresh').addEventListener('click', load);
+  tokenEl.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') load();
+  });
+
+  try {
+    var saved = sessionStorage.getItem('wx_tribute_admin_token');
+    if (saved) tokenEl.value = saved;
+  } catch (err) { /* 忽略 */ }
+})();
+</script>
+</body>
+</html>

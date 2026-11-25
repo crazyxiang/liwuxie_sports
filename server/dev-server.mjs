@@ -10,6 +10,7 @@
  */
 import http from 'node:http';
 import https from 'node:https';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -17,6 +18,8 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(fileURLToPath(new URL('../app/web', import.meta.url)));
 const PORT = Number(process.env.PORT || 8787);
+const TRIBUTE_FILE = path.join(ROOT, '..', '..', '.cache', 'tribute.json');
+const TRIBUTE_ADMIN_TOKEN = process.env.TRIBUTE_ADMIN_TOKEN || '';
 const SITE = 'https://www.doubaozhibo.com';
 const QQ = 'https://matchweb.sports.qq.com';
 const NBA_ID = '100000'; // 腾讯体育的 NBA 赛事 ID
@@ -749,7 +752,98 @@ async function handleKobe(req, res, url) {
   return json(res, 502, { error: '科比数据不可用', detail: '本地与远端都没有有效数据' });
 }
 
+function readTributeStore() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(TRIBUTE_FILE, 'utf8'));
+    if (raw && typeof raw === 'object' && raw.devices && typeof raw.devices === 'object') return raw;
+  } catch {
+    /* 第一次运行还没有文件 */
+  }
+  return { devices: {}, updatedAt: '' };
+}
+
+function saveTributeStore(store) {
+  fs.mkdirSync(path.dirname(TRIBUTE_FILE), { recursive: true });
+  const tmp = TRIBUTE_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(store, null, 2));
+  fs.renameSync(tmp, TRIBUTE_FILE);
+}
+
+function tributeHash(id) {
+  return crypto.createHash('sha256').update(String(id)).digest('hex').slice(0, 32);
+}
+
+function tributeDevice(raw) {
+  const id = String(raw || '').trim();
+  return /^[A-Za-z0-9_-]{16,64}$/.test(id) ? id : '';
+}
+
+function readRequestBody(req, limit = 4096) {
+  return new Promise((resolve) => {
+    let raw = '';
+    req.on('data', (chunk) => {
+      raw += chunk;
+      if (raw.length > limit) raw = raw.slice(0, limit);
+    });
+    req.on('end', () => resolve(raw));
+    req.on('error', () => resolve(''));
+  });
+}
+
+async function handleTribute(req, res, url) {
+  let payload = {};
+  if (req.method === 'POST') {
+    const raw = await readRequestBody(req);
+    try { payload = raw ? JSON.parse(raw) : {}; } catch { payload = {}; }
+  }
+  const id = tributeDevice(url.searchParams.get('device') || payload.deviceId);
+  if (!id) return json(res, 400, { error: 'device 不合法' });
+
+  const hash = tributeHash(id);
+  const store = readTributeStore();
+  const devices = store.devices || (store.devices = {});
+  const count = Object.keys(devices).length;
+
+  if (req.method === 'POST') {
+    let entry = devices[hash];
+    let added = false;
+    if (!entry) {
+      const rank = count + 1;
+      entry = devices[hash] = { at: new Date().toISOString(), rank };
+      store.updatedAt = new Date().toISOString();
+      saveTributeStore(store);
+      added = true;
+    }
+    return json(res, 200, { count: Object.keys(devices).length, mine: true, rank: entry.rank || 0, added });
+  }
+
+  if (req.method !== 'GET' && req.method !== 'HEAD') return json(res, 405, { error: '只支持 GET / POST' });
+  const entry = devices[hash];
+  return json(res, 200, { count, mine: !!entry, rank: entry ? entry.rank || 0 : 0 });
+}
+
+function handleTributeStats(req, res, url) {
+  const token = url.searchParams.get('token') || req.headers['x-admin-token'] || '';
+  if (TRIBUTE_ADMIN_TOKEN && token !== TRIBUTE_ADMIN_TOKEN) {
+    return json(res, 403, { error: '后台口令不正确' });
+  }
+  const store = readTributeStore();
+  const devices = store.devices || {};
+  const recent = Object.keys(devices).map((hash) => ({
+    id: hash.slice(0, 8),
+    at: devices[hash].at || '',
+    rank: devices[hash].rank || 0
+  })).sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, 30);
+  return json(res, 200, {
+    count: Object.keys(devices).length,
+    updatedAt: store.updatedAt || '',
+    recent
+  });
+}
+
 async function handleApi(req, res, url) {
+  if (url.pathname === '/api/tribute') return handleTribute(req, res, url);
+  if (url.pathname === '/api/tribute/stats') return handleTributeStats(req, res, url);
   if (url.pathname === '/api/kobe') return handleKobe(req, res, url);
   if (url.pathname === '/api/bili/video') return handleBiliVideo(req, res, url);
   if (url.pathname === '/api/bili/cover') return handleBiliCover(req, res, url);

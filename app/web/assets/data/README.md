@@ -20,8 +20,15 @@ App / 网页不会直接跨域拉 GitHub，而是请求 `/api/kobe`，由本机�
 
 ```json
 {
-  "version": 2,
-  "updatedAt": "2026-11-25T00:00:00.000Z",
+  "version": 4,
+  "updatedAt": "2026-11-25T08:20:00.000Z",
+  "tribute": {
+    "enabled": true,
+    "api": "",
+    "title": "致敬曼巴",
+    "desc": "点亮一盏灯，把想说的话留在斯台普斯。",
+    "note": "按一下，点亮属于你的一盏灯"
+  },
   "hero": {
     "interval": 5000,
     "slides": [
@@ -90,6 +97,13 @@ App / 网页不会直接跨域拉 GitHub，而是请求 `/api/kobe`，由本机�
 - `title`: 卡片标题；`dur`: 时长角标，可留空。
 - 封面优先读 `app/web/assets/kobe/covers/<BV>.jpg`；没有就自动走 `/api/bili/cover?bv=`。
 - 想下线某个视频，直接删掉对应 item；想加新分类，新增一个 `{tag, items}` 对象即可。
+
+### tribute
+
+- `enabled`: 是否显示「致敬曼巴」按钮。
+- `api`: 打卡计数接口。留空走同源 `/api/tribute`；APK 想连线上 Worker 时填完整地址，例如 `https://xxx.workers.dev/api/tribute`。改完 JSON 热更新即可，无需重装 APK。
+- `title` / `desc` / `note`: 按钮区文案。
+- 统计逻辑与 Cloudflare KV 部署见项目根目录 `TRIBUTE_SETUP.md`。
 
 ## 关于非 B 站片源
 

@@ -9,3 +9,10 @@ binding = "ASSETS"
 
 [observability]
 enabled = true
+
+# 致敬曼巴计数：先建一个 KV 命名空间，把返回的 id 填在这里，再取消注释。
+# 命令：npx wrangler kv namespace create TRIBUTE
+# [[kv_namespaces]]
+# binding = "TRIBUTE"
+# id = "把这里换成你的 KV 命名空间 id"
+
