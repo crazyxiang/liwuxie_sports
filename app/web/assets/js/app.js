@@ -2139,7 +2139,9 @@
         new Promise(function (resolve) { setTimeout(function () { resolve(''); }, 1200); })
       ]);
     ipWait.then(function (ipNow) {
-      return fetch(url, {
+      // ip 放 query：Trae 这类 FaaS 读不到 POST body，只有 query 一定传得到
+      var full = ipNow ? url + '&ip=' + encodeURIComponent(ipNow) : url;
+      return fetch(full, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deviceId: ensureTributeDevice(), ip: ipNow || '' }),

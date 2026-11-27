@@ -912,7 +912,7 @@ async function handleTributeGh(req, res, url) {
   if (req.method === 'POST') {
     if (!entry) {
       const now = new Date().toISOString();
-      const ip = publicIp(payload.ip) || clientIp(req);
+      const ip = publicIp(url.searchParams.get('ip')) || publicIp(payload.ip) || clientIp(req);
       const rec = {
         at: now,
         rank: count + 1,
@@ -990,7 +990,7 @@ async function handleTribute(req, res, url) {
     let added = false;
     if (!entry) {
       const rank = count + 1;
-      const ip = publicIp(payload.ip) || clientIp(req);
+      const ip = publicIp(url.searchParams.get('ip')) || publicIp(payload.ip) || clientIp(req);
       entry = devices[hash] = {
         at: new Date().toISOString(),
         rank,

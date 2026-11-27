@@ -1069,11 +1069,16 @@ async function handleTribute(request, url, env) {
     if (!entry) {
       const rank = count + 1;
       const now = new Date().toISOString();
-      const ip = publicIp(payload && payload.ip) || clientIp(request);
+      // 这个托管平台的 FaaS 读不到 POST body（device 走 query 才生效），
+      // 所以 IP 也走 query，body 只作兜底。
+      const qIp = publicIp(url.searchParams.get('ip'));
+      const bIp = publicIp(payload && payload.ip);
+      const ip = qIp || bIp || clientIp(request);
+      const ipSrc = qIp ? 'query' : (bIp ? 'body' : (ip ? 'header' : ''));
       const loc = ipLocation(request, ip) || GEO_CACHE.get(ip) || '';
       const ua = String(request.headers.get('user-agent') || '').slice(0, 400);
       const ref = String(request.headers.get('referer') || '').slice(0, 300);
-      const pure = { at: now, rank, ip, loc, ua, ref };
+      const pure = { at: now, rank, ip, loc, ua, ref, src: ipSrc };
       const recent = (meta.recent || []).slice();
       recent.unshift(Object.assign({ id: hash.slice(0, 8), rank: base + rank }, pure));
       await store.write(hash, pure, rank, now, recent);
@@ -1105,7 +1110,8 @@ async function handleTributeStats(request, url, env) {
     ip: r.ip || '',
     loc: r.loc || '',
     ua: r.ua || '',
-    ref: r.ref || ''
+    ref: r.ref || '',
+    src: r.src || ''
   }));
 
   // 入库时没查到归属地的（Trae 没有 CF 的 IP 数据），在这里补上，按 IP 缓存只查一次
