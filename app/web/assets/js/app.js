@@ -505,6 +505,39 @@
     if (isTopbarNode(cur)) {
       if (dir === 'left' || dir === 'right') {
         var tabs = visibleOf(document.querySelectorAll('.topbar .focusable'));
+        // 菜单（录像/直播/赛程/科比）和右侧按钮（刷新/李无邪）分开排顺序：
+        // 只按几何最近走的话，菜单项彼此离得近，焦点永远绕着菜单转，右侧按钮根本到不了
+        var menuTabs = visibleOf(document.querySelectorAll('.topbar .tabs .focusable'));
+        var sideBtns = visibleOf(document.querySelectorAll('.topbar .topbar-side .focusable'));
+        var mi = menuTabs.indexOf(cur);
+        if (mi >= 0) {
+          var nextTab = dir === 'right' ? menuTabs[mi + 1] : menuTabs[mi - 1];
+          if (nextTab) {
+            setFocus(nextTab);
+            followFocus(nextTab);
+            return;
+          }
+          // 菜单走到头：向右进右侧按钮区
+          if (dir === 'right' && sideBtns.length) {
+            setFocus(sideBtns[0]);
+            return;
+          }
+          return;
+        }
+        var si = sideBtns.indexOf(cur);
+        if (si >= 0) {
+          var nextSide = dir === 'right' ? sideBtns[si + 1] : sideBtns[si - 1];
+          if (nextSide) {
+            setFocus(nextSide);
+            return;
+          }
+          // 右侧按钮向左走回菜单最后一项
+          if (dir === 'left' && menuTabs.length) {
+            setFocus(menuTabs[menuTabs.length - 1]);
+            return;
+          }
+          return;
+        }
         var near = pickInDirection(tabs, cur, dir);
         if (near) {
           setFocus(near);
