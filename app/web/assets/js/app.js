@@ -1861,9 +1861,16 @@
     el.ktBtn.setAttribute('aria-pressed', c.mine ? 'true' : 'false');
 
     if (c.loading) {
-      el.ktLabel.textContent = '致敬中…';
-      el.ktNote.textContent = '正在把这一下写进曼巴的墙';
-      el.ktNote.className = 'kt-note';
+      if (c.mine) {
+        // 已经在本地记下了，只等后端确认，别让按钮一直转圈
+        el.ktLabel.textContent = '已致敬';
+        el.ktNote.textContent = '已记下，正在同步到墙上…';
+        el.ktNote.className = 'kt-note is-ok';
+      } else {
+        el.ktLabel.textContent = '致敬中…';
+        el.ktNote.textContent = '正在把这一下写进曼巴的墙';
+        el.ktNote.className = 'kt-note';
+      }
       return;
     }
     if (c.mine) {
@@ -1964,8 +1971,22 @@
     }
 
     ensureTributeDevice();
+    var prevCount = state.tribute.count === null || typeof state.tribute.count === 'undefined'
+      ? (Number(tributeCfg().base) || 0)
+      : Number(state.tribute.count);
+    // 先本地给反馈：数字立刻 +1、按钮立刻变“已致敬”，网络慢也不让人干等
+    state.tribute.count = prevCount + 1;
+    state.tribute.mine = true;
+    state.tribute.pending = true;
+    state.tribute.rank = prevCount + 1;
     state.tribute.loading = true;
     paintTribute();
+    if (el.ktBtn) {
+      el.ktBtn.classList.remove('is-pop');
+      void el.ktBtn.offsetWidth;
+      el.ktBtn.classList.add('is-pop');
+      setTimeout(function () { el.ktBtn.classList.remove('is-pop'); }, 900);
+    }
 
     var url = withTributeDevice(tributeApiUrl());
     fetch(url, {
@@ -1989,6 +2010,10 @@
         // 服务端连不上就如实报错，不再本机自增——否则同一台设备点几次就多几个人
         state.tribute.loading = false;
         state.tribute.loaded = false;
+        state.tribute.mine = false;
+        state.tribute.pending = false;
+        state.tribute.count = prevCount;
+        state.tribute.rank = 0;
         paintTribute();
         if (el.ktNote) {
           el.ktNote.textContent = '致敬墙暂时没连上，稍后再试';

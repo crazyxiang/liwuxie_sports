@@ -777,16 +777,89 @@ function tributeBase(env) {
   return v > 0 ? v : TRIBUTE_BASE_DEFAULT;
 }
 
-// 访客 IP：Cloudflare 会给出 cf-connecting-ip，本地/其他环境退化到 x-forwarded-for
+// 访客 IP：各家 CDN/FaaS 的透传头名字不一样（CF 是 cf-connecting-ip，Trae/火山是别的），
+// 所以先按常见顺序取，最后再扫一遍所有头，找第一个像公网 IP 的值。
+const IP_HEADERS = [
+  'cf-connecting-ip', 'true-client-ip', 'x-real-ip', 'x-client-ip', 'x-original-forwarded-for',
+  'ali-cdn-real-ip', 'eo-connecting-ip', 'fastly-client-ip', 'x-forwarded-for', 'forwarded', 'remote-addr'
+];
+
+function looksLikeIp(v) {
+  const s = String(v || '').trim().replace(/^::ffff:/, '').replace(/^"|"$/g, '');
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(s) || /^[0-9a-f]{0,4}(:[0-9a-f]{0,4}){2,7}$/i.test(s);
+}
+
+function isPrivateIp(ip) {
+  return /^(10\.|127\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip) || ip === '::1' || ip === '';
+}
+
 function clientIp(request) {
   const h = request.headers;
-  const ip = h.get('cf-connecting-ip') || (h.get('x-forwarded-for') || '').split(',')[0].trim() || h.get('x-real-ip') || '';
-  return String(ip).replace(/^::ffff:/, '').slice(0, 64);
+  for (const name of IP_HEADERS) {
+    const raw = h.get(name) || '';
+    if (!raw) continue;
+    for (const part of String(raw).split(',')) {
+      const v = part.trim().replace(/^for=/i, '').replace(/^::ffff:/, '').replace(/^\[|\]$/g, '');
+      if (looksLikeIp(v) && !isPrivateIp(v)) return v.slice(0, 64);
+    }
+  }
+  // 兜底：某些网关把头名换成了自定义的，全量扫一遍
+  let priv = '';
+  try {
+    for (const [name, value] of h.entries()) {
+      if (/cookie|authorization/i.test(name)) continue;
+      for (const part of String(value).split(/[,;\s]+/)) {
+        const v = part.replace(/^::ffff:/, '');
+        if (!looksLikeIp(v)) continue;
+        if (!isPrivateIp(v)) return v.slice(0, 64);
+        if (!priv) priv = v;
+      }
+    }
+  } catch { /* ignore */ }
+  const direct = h.get('x-real-ip') || (h.get('x-forwarded-for') || '').split(',')[0].trim() || '';
+  return String(priv || direct || '').replace(/^::ffff:/, '').slice(0, 64);
+}
+
+// 归属地：CF 有自带数据；其他环境（Trae/火山等）用免费 IP 库，结果按 IP 缓存
+const GEO_CACHE = new Map();
+
+async function geoLookup(ip) {
+  if (!ip || isPrivateIp(ip)) return '';
+  if (GEO_CACHE.has(ip)) return GEO_CACHE.get(ip);
+  const ctrl = () => AbortSignal.timeout(900);
+  const candidates = [
+    async () => {
+      const r = await fetch('https://opendata.baidu.com/api.php?resource_id=6006&oe=utf8&query=' + encodeURIComponent(ip), { signal: ctrl() });
+      const d = await r.json();
+      const loc = d && d.data && d.data[0] && d.data[0].location;
+      return loc ? String(loc).replace(/\s+/g, ' · ') : '';
+    },
+    async () => {
+      const r = await fetch('https://api.ip.sb/geoip/' + encodeURIComponent(ip), { signal: ctrl() });
+      const d = await r.json();
+      return [d.country, d.region, d.city].filter(Boolean).join(' · ');
+    },
+    async () => {
+      const r = await fetch('https://ipapi.co/' + encodeURIComponent(ip) + '/json/', { signal: ctrl() });
+      const d = await r.json();
+      if (d.error) return '';
+      return [d.country_name, d.region, d.city].filter(Boolean).join(' · ');
+    }
+  ];
+  let loc = '';
+  for (const fn of candidates) {
+    try {
+      loc = await fn();
+      if (loc) break;
+    } catch { /* 换下一个 */ }
+  }
+  GEO_CACHE.set(ip, loc);
+  return loc;
 }
 
 // Cloudflare 自带 IP 归属地，无需外部接口（city 为空时退到 region/country）
 function ipLocation(request, ip) {
-  if (/^(127\.|10\.|192\.168\.|169\.254\.|::1$)/i.test(ip)) return '内网';
+  if (isPrivateIp(ip)) return '内网';
   const cf = request.cf || {};
   const parts = [cf.country, cf.region, cf.city].filter(Boolean);
   let loc = parts.join(' · ');
@@ -796,6 +869,9 @@ function ipLocation(request, ip) {
 
 // ---------------- 致敬墙存储：KV / GitHub / 本地，三选一 ----------------
 // 目的：不管跑在 Cloudflare、Trae 还是别处，几端读写的是同一份数据。
+// 同一实例里把刚读到的文件缓存几秒，省掉一次 GitHub 往返（打卡能快一大截）
+const GH_DOC_CACHE = new Map();
+const GH_CACHE_TTL = 6000;
 
 function ghConf(env) {
   const repo = String((env && env.GITHUB_REPO) || '').trim();
@@ -882,11 +958,19 @@ function kvTributeStore(kv) {
 
 function ghTributeStore(conf) {
   const state = { doc: null, sha: '', dirty: false, recent: null };
+  const cacheKey = conf.repo + '/' + conf.path;
   async function ensure() {
     if (!state.doc) {
-      const r = await ghLoad(conf);
-      state.doc = r.doc;
-      state.sha = r.sha;
+      const hit = GH_DOC_CACHE.get(cacheKey);
+      if (hit && Date.now() - hit.at < GH_CACHE_TTL) {
+        state.doc = hit.doc;
+        state.sha = hit.sha;
+      } else {
+        const r = await ghLoad(conf);
+        state.doc = r.doc;
+        state.sha = r.sha;
+        GH_DOC_CACHE.set(cacheKey, { doc: r.doc, sha: r.sha, at: Date.now() });
+      }
     }
   }
   return {
@@ -912,8 +996,25 @@ function ghTributeStore(conf) {
     async flush() {
       if (!state.dirty) return;
       if (state.recent) state.doc.recent = state.recent.slice(0, 50);
-      await ghSave(conf, state.doc, state.sha);
+      try {
+        await ghSave(conf, state.doc, state.sha);
+      } catch (err) {
+        // 并发写导致 sha 过期：拉最新的一份，把我们的改动合进去再写一次
+        if (!/409/.test(String(err && err.message))) throw err;
+        const fresh = await ghLoad(conf);
+        const merged = fresh.doc;
+        merged.devices = merged.devices || {};
+        for (const k of Object.keys(state.doc.devices || {})) {
+          if (!merged.devices[k]) merged.devices[k] = state.doc.devices[k];
+        }
+        merged.updatedAt = state.doc.updatedAt;
+        if (state.recent) merged.recent = state.recent.slice(0, 50);
+        await ghSave(conf, merged, fresh.sha);
+        state.doc = merged;
+        state.sha = fresh.sha;
+      }
       state.dirty = false;
+      GH_DOC_CACHE.set(cacheKey, { doc: state.doc, sha: state.sha, at: Date.now() });
     }
   };
 }
@@ -952,7 +1053,7 @@ async function handleTribute(request, url, env) {
       const rank = count + 1;
       const now = new Date().toISOString();
       const ip = clientIp(request);
-      const loc = ipLocation(request, ip);
+      const loc = ipLocation(request, ip) || GEO_CACHE.get(ip) || '';
       const ua = String(request.headers.get('user-agent') || '').slice(0, 400);
       const ref = String(request.headers.get('referer') || '').slice(0, 300);
       const pure = { at: now, rank, ip, loc, ua, ref };
@@ -989,6 +1090,21 @@ async function handleTributeStats(request, url, env) {
     ua: r.ua || '',
     ref: r.ref || ''
   }));
+
+  // 入库时没查到归属地的（Trae 没有 CF 的 IP 数据），在这里补上，按 IP 缓存只查一次
+  const missing = Array.from(new Set(recent.filter((r) => !r.loc && r.ip && !isPrivateIp(r.ip)).map((r) => r.ip))).slice(0, 10);
+  if (missing.length) {
+    const locs = await Promise.all(missing.map((ip) => geoLookup(ip).catch(() => '')));
+    const map = new Map();
+    missing.forEach((ip, i) => { if (locs[i]) map.set(ip, locs[i]); });
+    recent.forEach((r) => {
+      if (!r.loc && r.ip) {
+        if (map.get(r.ip)) r.loc = map.get(r.ip);
+        else if (isPrivateIp(r.ip)) r.loc = '内网';
+      }
+    });
+  }
+
   return json({ count: base + (meta.total || 0), realCount: meta.total || 0, base, updatedAt: meta.updatedAt || '', recent, store: store.kind });
 }
 
