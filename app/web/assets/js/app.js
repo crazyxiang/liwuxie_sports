@@ -1790,8 +1790,89 @@
     return tributeDevice;
   }
 
-  function readTributeCache() {
+  // ---- 访客公网 IP ----
+  // Trae 这类托管会把客户端 IP 头全部剥掉，服务端拿不到；那就让浏览器自己去问一台回显服务，
+  // 结果缓存 1 小时，打卡时随 body 一起送上去（后端只接受合法公网 IP）。
+  var TRIBUTE_IP_KEY = 'wx_tribute_ip_v1';
+  var tributeIpReq = null;
+  var tributeIpVal = '';
+
+  function ipOk(v) {
+    v = String(v || '').trim();
+    if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(v)) return '';
+    if (/^(10\.|127\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.)/.test(v)) return '';
+    return v;
+  }
+
+  function tributeIpCached() {
+    if (tributeIpVal) return tributeIpVal;
     try {
+      var o = JSON.parse(localStorage.getItem(TRIBUTE_IP_KEY) || '{}');
+      var ok = ipOk(o && o.ip);
+      if (ok && Date.now() - (o.at || 0) < 60 * 60 * 1000) {
+        tributeIpVal = ok;
+        return ok;
+      }
+    } catch (err) { /* 忽略 */ }
+    return '';
+  }
+
+  function tributePublicIp() {
+    return tributeIpCached();
+  }
+
+  function probeIp(url, pick) {
+    return fetch(url, { cache: 'no-store' }).then(function (res) {
+      return res.text();
+    }).then(function (text) {
+      var v = ipOk(pick(text));
+      if (!v) throw new Error('no ip');
+      return v;
+    });
+  }
+
+  function ensureTributeIp() {
+    var cached = tributeIpCached();
+    if (cached) return Promise.resolve(cached);
+    if (tributeIpReq) return tributeIpReq;
+
+    var probes = [
+      function () { return probeIp('https://api.ipify.org?format=json', function (t) { try { return JSON.parse(t).ip; } catch (e) { return ''; } }); },
+      function () { return probeIp('https://api.ip.sb/ip', function (t) { return t; }); },
+      function () { return probeIp('https://ipapi.co/ip/', function (t) { return t; }); },
+      function () {
+        return probeIp('https://www.cloudflare.com/cdn-cgi/trace', function (t) {
+          var m = /^ip=(.+)$/m.exec(t);
+          return m ? m[1] : '';
+        });
+      }
+    ];
+
+    tributeIpReq = new Promise(function (resolve) {
+      var left = probes.length;
+      var done = false;
+      function finish(v) {
+        if (done) return;
+        done = true;
+        tributeIpReq = null;
+        if (v) {
+          tributeIpVal = v;
+          try { localStorage.setItem(TRIBUTE_IP_KEY, JSON.stringify({ ip: v, at: Date.now() })); } catch (err) { /* 忽略 */ }
+        }
+        resolve(v || '');
+      }
+      probes.forEach(function (fn) {
+        fn().then(finish).catch(function () {
+          left -= 1;
+          if (left <= 0) finish('');
+        });
+      });
+      setTimeout(function () { finish(tributeIpVal || ''); }, 4000);
+    });
+    return tributeIpReq;
+  }
+
+  function readTributeCache() {    try {
       var raw = JSON.parse(localStorage.getItem(TRIBUTE_CACHE_KEY) || '{}');
       return raw && typeof raw === 'object' ? raw : {};
     } catch (err) {
@@ -1989,11 +2070,20 @@
     }
 
     var url = withTributeDevice(tributeApiUrl());
-    fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ deviceId: ensureTributeDevice() }),
-      cache: 'no-store'
+    // 公网 IP 已经探到了就直接带上；还没探到就等最多 1.2 秒，别把记录写成空的
+    var ipWait = tributePublicIp()
+      ? Promise.resolve(tributePublicIp())
+      : Promise.race([
+        ensureTributeIp(),
+        new Promise(function (resolve) { setTimeout(function () { resolve(''); }, 1200); })
+      ]);
+    ipWait.then(function (ipNow) {
+      return fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceId: ensureTributeDevice(), ip: ipNow || '' }),
+        cache: 'no-store'
+      });
     })
       .then(function (res) {
         return res.text().then(function (text) {
@@ -2026,6 +2116,8 @@
   function initTribute() {
     if (!el.tribute) return;
     ensureTributeDevice();
+    // 页面一进来就偷偷把公网 IP 探好，等用户点的时候直接用
+    ensureTributeIp();
     var cached = readTributeCache();
     state.tribute.count = typeof cached.count === 'number' ? cached.count : tributeCfg().base;
     state.tribute.mine = !!cached.mine;

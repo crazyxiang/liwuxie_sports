@@ -790,7 +790,15 @@ function looksLikeIp(v) {
 }
 
 function isPrivateIp(ip) {
-  return /^(10\.|127\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip) || ip === '::1' || ip === '';
+  if (!ip) return false;
+  return /^(10\.|127\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip) || ip === '::1';
+}
+
+// 前端自己报上来的 IP，只认合法公网地址
+function publicIp(v) {
+  const s = String(v || '').trim().replace(/^::ffff:/, '');
+  if (!looksLikeIp(s) || isPrivateIp(s)) return '';
+  return s.slice(0, 64);
 }
 
 function clientIp(request) {
@@ -859,6 +867,7 @@ async function geoLookup(ip) {
 
 // Cloudflare 自带 IP 归属地，无需外部接口（city 为空时退到 region/country）
 function ipLocation(request, ip) {
+  if (!ip) return '';
   if (isPrivateIp(ip)) return '内网';
   const cf = request.cf || {};
   const parts = [cf.country, cf.region, cf.city].filter(Boolean);
@@ -934,6 +943,13 @@ async function ghSave(conf, doc, sha) {
   if (sha) body.sha = sha;
   const res = await ghCall(conf, 'PUT', body);
   if (!res.ok) throw new Error('GitHub 写入失败 HTTP ' + res.status);
+  // PUT 会把新版本一起返回，顺手拿新的 sha，省掉后面再读一次（否则下一次写必然冲突）
+  try {
+    const out = await res.json();
+    return (out && out.content && out.content.sha) || '';
+  } catch {
+    return '';
+  }
 }
 
 function kvTributeStore(kv) {
@@ -997,7 +1013,8 @@ function ghTributeStore(conf) {
       if (!state.dirty) return;
       if (state.recent) state.doc.recent = state.recent.slice(0, 50);
       try {
-        await ghSave(conf, state.doc, state.sha);
+        const newSha = await ghSave(conf, state.doc, state.sha);
+        if (newSha) state.sha = newSha;
       } catch (err) {
         // 并发写导致 sha 过期：拉最新的一份，把我们的改动合进去再写一次
         if (!/409/.test(String(err && err.message))) throw err;
@@ -1009,9 +1026,9 @@ function ghTributeStore(conf) {
         }
         merged.updatedAt = state.doc.updatedAt;
         if (state.recent) merged.recent = state.recent.slice(0, 50);
-        await ghSave(conf, merged, fresh.sha);
+        const retrySha = await ghSave(conf, merged, fresh.sha);
         state.doc = merged;
-        state.sha = fresh.sha;
+        state.sha = retrySha || fresh.sha;
       }
       state.dirty = false;
       GH_DOC_CACHE.set(cacheKey, { doc: state.doc, sha: state.sha, at: Date.now() });
@@ -1052,7 +1069,7 @@ async function handleTribute(request, url, env) {
     if (!entry) {
       const rank = count + 1;
       const now = new Date().toISOString();
-      const ip = clientIp(request);
+      const ip = publicIp(payload && payload.ip) || clientIp(request);
       const loc = ipLocation(request, ip) || GEO_CACHE.get(ip) || '';
       const ua = String(request.headers.get('user-agent') || '').slice(0, 400);
       const ref = String(request.headers.get('referer') || '').slice(0, 300);
