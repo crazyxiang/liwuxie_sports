@@ -42,6 +42,9 @@ const CORS = {
 // Cache API 在本地 Node 自测时不存在，做个兜底
 const CACHE = typeof caches !== 'undefined' ? caches.default : null;
 
+// 致敬墙展示基数：真实打卡叠加在此之上（可用环境变量 TRIBUTE_BASE 覆盖）
+const TRIBUTE_BASE_DEFAULT = 10000;
+
 // ---------------- 抓取 ----------------
 
 async function upstream(target, { referer = SITE + '/', timeout = 15000 } = {}) {
@@ -769,10 +772,166 @@ function tributeDevice(raw) {
   return /^[A-Za-z0-9_-]{16,64}$/.test(id) ? id : '';
 }
 
+function tributeBase(env) {
+  const v = Number(env && env.TRIBUTE_BASE);
+  return v > 0 ? v : TRIBUTE_BASE_DEFAULT;
+}
+
+// 访客 IP：Cloudflare 会给出 cf-connecting-ip，本地/其他环境退化到 x-forwarded-for
+function clientIp(request) {
+  const h = request.headers;
+  const ip = h.get('cf-connecting-ip') || (h.get('x-forwarded-for') || '').split(',')[0].trim() || h.get('x-real-ip') || '';
+  return String(ip).replace(/^::ffff:/, '').slice(0, 64);
+}
+
+// Cloudflare 自带 IP 归属地，无需外部接口（city 为空时退到 region/country）
+function ipLocation(request, ip) {
+  if (/^(127\.|10\.|192\.168\.|169\.254\.|::1$)/i.test(ip)) return '内网';
+  const cf = request.cf || {};
+  const parts = [cf.country, cf.region, cf.city].filter(Boolean);
+  let loc = parts.join(' · ');
+  if (!loc && cf.colo) loc = 'CF 节点 ' + cf.colo;
+  return loc;
+}
+
+// ---------------- 致敬墙存储：KV / GitHub / 本地，三选一 ----------------
+// 目的：不管跑在 Cloudflare、Trae 还是别处，几端读写的是同一份数据。
+
+function ghConf(env) {
+  const repo = String((env && env.GITHUB_REPO) || '').trim();
+  const token = String((env && env.GITHUB_TOKEN) || '').trim();
+  if (!repo || !token) return null;
+  return {
+    repo,
+    token,
+    path: String(env.GITHUB_PATH || 'tribute.json').trim().replace(/^\/+/, ''),
+    branch: String(env.GITHUB_BRANCH || 'main').trim()
+  };
+}
+
+function b64encode(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+
+function b64decode(b64) {
+  const bin = atob(String(b64 || '').replace(/\s/g, ''));
+  const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+async function ghCall(conf, method, body) {
+  const base = `https://api.github.com/repos/${conf.repo}/contents/${conf.path.split('/').map(encodeURIComponent).join('/')}`;
+  const url = method === 'GET' ? `${base}?ref=${encodeURIComponent(conf.branch)}` : base;
+  return fetch(url, {
+    method,
+    headers: {
+      Authorization: 'Bearer ' + conf.token,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'User-Agent': 'wuxie-tribute',
+      ...(body ? { 'Content-Type': 'application/json' } : {})
+    },
+    body: body ? JSON.stringify(body) : undefined
+  });
+}
+
+async function ghLoad(conf) {
+  const res = await ghCall(conf, 'GET');
+  if (res.status === 404) return { doc: { devices: {}, updatedAt: '' }, sha: '' };
+  if (!res.ok) throw new Error('GitHub 读取失败 HTTP ' + res.status);
+  const data = await res.json();
+  let doc = { devices: {}, updatedAt: '' };
+  try { doc = JSON.parse(b64decode(data.content)) || doc; } catch { /* 空文件 */ }
+  if (!doc.devices || typeof doc.devices !== 'object') doc.devices = {};
+  return { doc, sha: data.sha || '' };
+}
+
+async function ghSave(conf, doc, sha) {
+  const body = {
+    message: 'tribute: ' + new Date().toISOString(),
+    content: b64encode(JSON.stringify(doc, null, 2)),
+    branch: conf.branch
+  };
+  if (sha) body.sha = sha;
+  const res = await ghCall(conf, 'PUT', body);
+  if (!res.ok) throw new Error('GitHub 写入失败 HTTP ' + res.status);
+}
+
+function kvTributeStore(kv) {
+  return {
+    kind: 'kv',
+    async read() {
+      const total = Number(await kv.get('total')) || 0;
+      const updatedAt = (await kv.get('updatedAt')) || '';
+      const recent = (await kv.get('recent', 'json')) || [];
+      return { total, updatedAt, recent };
+    },
+    getDevice: (hash) => kv.get('d:' + hash, 'json'),
+    async write(hash, entry, total, updatedAt, recent) {
+      await kv.put('d:' + hash, JSON.stringify(entry));
+      await kv.put('total', String(total));
+      await kv.put('updatedAt', updatedAt);
+      if (recent) await kv.put('recent', JSON.stringify(recent.slice(0, 50)));
+    },
+    async flush() {}
+  };
+}
+
+function ghTributeStore(conf) {
+  const state = { doc: null, sha: '', dirty: false, recent: null };
+  async function ensure() {
+    if (!state.doc) {
+      const r = await ghLoad(conf);
+      state.doc = r.doc;
+      state.sha = r.sha;
+    }
+  }
+  return {
+    kind: 'github',
+    async read() {
+      await ensure();
+      const devices = state.doc.devices || {};
+      const list = Object.keys(devices).map((h) => Object.assign({ id: h.slice(0, 8) }, devices[h]));
+      list.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+      return { total: list.length, updatedAt: state.doc.updatedAt || '', recent: list.slice(0, 50) };
+    },
+    async getDevice(hash) {
+      await ensure();
+      return state.doc.devices[hash] || null;
+    },
+    async write(hash, entry, total, updatedAt, recent) {
+      await ensure();
+      state.doc.devices[hash] = entry;
+      state.doc.updatedAt = updatedAt;
+      state.recent = recent;
+      state.dirty = true;
+    },
+    async flush() {
+      if (!state.dirty) return;
+      if (state.recent) state.doc.recent = state.recent.slice(0, 50);
+      await ghSave(conf, state.doc, state.sha);
+      state.dirty = false;
+    }
+  };
+}
+
+function makeTributeStore(env) {
+  if (env && env.TRIBUTE) return kvTributeStore(env.TRIBUTE);
+  const conf = ghConf(env);
+  if (conf) return ghTributeStore(conf);
+  return null;
+}
+
 async function handleTribute(request, url, env) {
-  const kv = env && env.TRIBUTE;
-  if (!kv) {
-    return json({ error: '致敬计数未配置', detail: '请先在 Cloudflare 创建 KV 命名空间并绑定 TRIBUTE' }, 503);
+  const store = makeTributeStore(env);
+  if (!store) {
+    return json({
+      error: '致敬计数未配置',
+      detail: '绑定 KV(TRIBUTE)，或设置 GITHUB_TOKEN + GITHUB_REPO 让数据落到仓库里'
+    }, 503);
   }
 
   let payload = {};
@@ -782,44 +941,55 @@ async function handleTribute(request, url, env) {
   const id = tributeDevice(url.searchParams.get('device') || (payload && payload.deviceId));
   if (!id) return json({ error: 'device 不合法' }, 400);
 
+  const base = tributeBase(env);
   const hash = await sha256Hex(id);
-  const key = 'd:' + hash;
-  const count = Number(await kv.get('total')) || 0;
-  const entry = await kv.get(key, 'json');
+  const meta = await store.read();
+  const count = meta.total || 0;
+  const entry = await store.getDevice(hash);
 
   if (request.method === 'POST') {
     if (!entry) {
       const rank = count + 1;
       const now = new Date().toISOString();
-      await kv.put(key, JSON.stringify({ at: now, rank }));
-      await kv.put('total', String(rank));
-      await kv.put('updatedAt', now);
-      try {
-        const recent = (await kv.get('recent', 'json')) || [];
-        recent.unshift({ id: hash.slice(0, 8), at: now, rank });
-        await kv.put('recent', JSON.stringify(recent.slice(0, 50)));
-      } catch { /* 后台日志写失败不影响打卡 */ }
-      return json({ count: rank, mine: true, rank, added: true });
+      const ip = clientIp(request);
+      const loc = ipLocation(request, ip);
+      const ua = String(request.headers.get('user-agent') || '').slice(0, 400);
+      const ref = String(request.headers.get('referer') || '').slice(0, 300);
+      const pure = { at: now, rank, ip, loc, ua, ref };
+      const recent = (meta.recent || []).slice();
+      recent.unshift(Object.assign({ id: hash.slice(0, 8), rank: base + rank }, pure));
+      await store.write(hash, pure, rank, now, recent);
+      try { await store.flush(); } catch (err) {
+        return json({ error: '致敬写入失败', detail: String(err.message || err) }, 503);
+      }
+      return json({ count: base + rank, mine: true, rank: base + rank, added: true });
     }
-    return json({ count, mine: true, rank: entry.rank || 0, added: false });
+    return json({ count: base + count, mine: true, rank: base + (entry.rank || 0), added: false });
   }
 
   if (request.method !== 'GET') return json({ error: '只支持 GET / POST' }, 405);
-  return json({ count, mine: !!entry, rank: entry ? entry.rank || 0 : 0 });
+  return json({ count: base + count, mine: !!entry, rank: entry ? base + (entry.rank || 0) : 0 });
 }
 
 async function handleTributeStats(request, url, env) {
   const need = env && env.ADMIN_TOKEN;
-  if (!need) return json({ error: '后台未设置 ADMIN_TOKEN' }, 503);
   const got = request.headers.get('X-Admin-Token') || url.searchParams.get('token') || '';
-  if (got !== need) return json({ error: '后台口令不正确' }, 403);
+  if (need && got !== need) return json({ error: '后台口令不正确' }, 403);
 
-  const kv = env && env.TRIBUTE;
-  if (!kv) return json({ error: 'KV 未绑定' }, 503);
-  const count = Number(await kv.get('total')) || 0;
-  const updatedAt = (await kv.get('updatedAt')) || '';
-  const recent = (await kv.get('recent', 'json')) || [];
-  return json({ count, updatedAt, recent });
+  const store = makeTributeStore(env);
+  if (!store) return json({ error: 'KV 或 GitHub 未配置' }, 503);
+  const base = tributeBase(env);
+  const meta = await store.read();
+  const recent = (meta.recent || []).map((r) => ({
+    id: r.id || String(r.hash || '').slice(0, 8),
+    at: r.at || '',
+    rank: store.kind === 'github' ? base + (r.rank || 0) : (r.rank || base),
+    ip: r.ip || '',
+    loc: r.loc || '',
+    ua: r.ua || '',
+    ref: r.ref || ''
+  }));
+  return json({ count: base + (meta.total || 0), realCount: meta.total || 0, base, updatedAt: meta.updatedAt || '', recent, store: store.kind });
 }
 
 // ---------------- 路由 ----------------

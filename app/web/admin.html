@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>致敬曼巴 · 后台</title>
+<style>
+  :root {
+    --gold: #fdb927;
+    --purple: #552583;
+    --ink: #0d0914;
+    --card: rgba(31, 21, 45, .86);
+    --line: rgba(253, 185, 39, .18);
+    --muted: #a08cc0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    padding: 40px 20px 60px;
+    color: #f3ecff;
+    font-family: "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+    background:
+      radial-gradient(900px 500px at 10% 0%, rgba(253, 185, 39, .11), transparent 65%),
+      radial-gradient(900px 600px at 100% 100%, rgba(85, 37, 131, .38), transparent 68%),
+      #0d0914;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  .top { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; margin-bottom: 24px; }
+  .eyebrow { font-size: 11px; letter-spacing: 3px; color: rgba(253, 185, 39, .78); font-weight: 700; }
+  h1 { margin: 8px 0 0; font-size: clamp(26px, 4vw, 40px); line-height: 1.1; letter-spacing: 2px; }
+  .sub { margin: 9px 0 0; color: var(--muted); font-size: 13px; }
+  .ghost {
+    border: 1px solid rgba(255, 255, 255, .16);
+    background: rgba(255, 255, 255, .06);
+    color: #e9dcff;
+    border-radius: 999px;
+    padding: 10px 18px;
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .ghost:hover { border-color: rgba(253, 185, 39, .45); color: var(--gold); }
+  .card {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 22px;
+    background: var(--card);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, .45);
+  }
+  .card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(520px 240px at 12% 0%, rgba(253, 185, 39, .13), transparent 68%);
+  }
+  .stat { position: relative; padding: 32px 34px 26px; }
+  .stat-label { font-size: 12px; letter-spacing: 2px; color: var(--muted); }
+  #count {
+    margin-top: 6px;
+    font-size: clamp(56px, 12vw, 92px);
+    line-height: .95;
+    font-weight: 900;
+    color: var(--gold);
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 0 46px rgba(253, 185, 39, .18);
+  }
+  #updated { margin-top: 12px; font-size: 12px; color: #8e7bab; }
+  .login {
+    position: relative;
+    display: none;
+    gap: 10px;
+    padding: 20px 34px 28px;
+    border-top: 1px solid rgba(255, 255, 255, .06);
+    flex-wrap: wrap;
+  }
+  .login.show { display: flex; }
+  input {
+    flex: 1 1 240px;
+    min-width: 0;
+    padding: 12px 16px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, .12);
+    background: rgba(8, 5, 13, .72);
+    color: #fff;
+    font: inherit;
+    font-size: 14px;
+    outline: none;
+  }
+  input:focus { border-color: rgba(253, 185, 39, .5); box-shadow: 0 0 0 3px rgba(253, 185, 39, .12); }
+  .primary {
+    border: 0;
+    border-radius: 12px;
+    padding: 12px 22px;
+    background: linear-gradient(135deg, #fdd34a, #e79b1f);
+    color: #1d1208;
+    font: inherit;
+    font-weight: 800;
+    cursor: pointer;
+  }
+  .primary:hover { filter: brightness(1.05); }
+  .msg { flex-basis: 100%; min-height: 18px; font-size: 12.5px; color: #ff9a7a; }
+  .msg.ok { color: #8fe3b0; }
+  .list-head { display: flex; align-items: baseline; justify-content: space-between; margin: 28px 2px 10px; }
+  .list-head h2 { margin: 0; font-size: 16px; letter-spacing: 1px; }
+  .list-head span { font-size: 12px; color: var(--muted); }
+  .table-card { padding: 8px 18px 12px; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 11px 8px; border-bottom: 1px solid rgba(255, 255, 255, .055); }
+  th { color: #8e7bab; font-weight: 500; font-size: 11.5px; letter-spacing: 1px; }
+  td { color: #ded2f2; }
+  tbody tr:last-child td { border-bottom: 0; }
+  .rank { color: var(--gold); font-weight: 800; width: 70px; }
+  .stat-sub { margin-top: 6px; font-size: 12px; color: #7f6d9b; }
+  .stat-sub b { color: #c9b6e4; font-weight: 700; }
+  .table-scroll { overflow-x: auto; }
+  td.mono, code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+  td.ip { color: #b7a6d2; white-space: nowrap; }
+  td.loc { color: #ded2f2; }
+  td.loc .loc-sub { display: block; margin-top: 2px; font-size: 11px; color: #7f6d9b; }
+  .tag {
+    display: inline-block;
+    margin: 1px 4px 1px 0;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, .12);
+    background: rgba(255, 255, 255, .05);
+    font-size: 11px;
+    color: #d8c9ee;
+    white-space: nowrap;
+  }
+  .tag.os { border-color: rgba(253, 185, 39, .3); color: #f3d79a; }
+  .tag.bw { border-color: rgba(120, 140, 255, .3); color: #c3ccff; }
+  .empty { padding: 26px 8px; color: var(--muted); font-size: 13px; }
+  .foot { margin-top: 18px; color: #6f6188; font-size: 11.5px; line-height: 1.8; }
+  @media (max-width: 620px) {
+    body { padding: 24px 14px 40px; }
+    .top { align-items: flex-start; flex-direction: column; }
+    .stat { padding: 26px 22px 22px; }
+    .login { padding: 18px 22px 24px; }
+    .table-card { padding: 6px 12px 10px; }
+    .rank { width: 54px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div>
+      <div class="eyebrow">MAMBA FOREVER · ADMIN</div>
+      <h1>致敬曼巴 · 后台</h1>
+      <p class="sub">一台设备记一次，附带 IP、归属地、User-Agent 与来源页，用于看是谁、从哪来。不上传任何账号信息。</p>
+    </div>
+    <button class="ghost" id="refresh" type="button">刷新数据</button>
+  </div>
+
+  <div class="card">
+    <div class="stat">
+      <div class="stat-label">累计致敬人数</div>
+      <div id="count">10,000</div>
+      <div id="updated">输入后台口令后查看</div>
+      <div class="stat-sub" id="statSub"></div>
+    </div>
+    <div class="login" id="loginBox">
+      <input id="token" type="password" placeholder="后台口令（未设置口令时留空直接进）" autocomplete="current-password">
+      <button class="primary" id="enter" type="button">进入后台</button>
+      <div class="msg" id="msg"></div>
+    </div>
+  </div>
+
+  <div class="list-head">
+    <h2>最近打卡</h2>
+    <span id="deviceCount"></span>
+  </div>
+  <div class="card table-card">
+    <table>
+      <thead><tr><th>序号</th><th>时间</th><th>地区</th><th>IP</th><th>设备</th><th>浏览器</th><th>标记</th></tr></thead>
+      <tbody id="rows"><tr><td colspan="7" class="empty">还没有数据，或还没有验证口令。</td></tr></tbody>
+    </table>
+  </div>
+
+  <p class="foot">数据存两处，看你跑在哪个环境：本机开发写 <code>.cache/tribute.json</code>；Cloudflare 写 KV（total 总数、recent 最近 50 条、d:* 每台设备）。清测试数据直接删对应 key / 条目即可。</p>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var countEl = document.getElementById('count');
+  var updatedEl = document.getElementById('updated');
+  var rowsEl = document.getElementById('rows');
+  var msgEl = document.getElementById('msg');
+  var tokenEl = document.getElementById('token');
+  var deviceCountEl = document.getElementById('deviceCount');
+  var statSubEl = document.getElementById('statSub');
+  var loginBox = document.getElementById('loginBox');
+
+  function fmtTime(s) {
+    if (!s) return '—';
+    var d = new Date(s);
+    if (isNaN(d.getTime())) return s;
+    return d.toLocaleString('zh-CN', { hour12: false });
+  }
+
+  function msg(text, ok) {
+    msgEl.textContent = text || '';
+    msgEl.className = 'msg' + (ok ? ' ok' : '');
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+
+  // 只抽重要的：系统/机型 + 浏览器，完整 UA 挂在 title 里
+  function parseUa(ua) {
+    var s = String(ua || '');
+    var os = '';
+    var browser = '';
+    if (/MicroMessenger/i.test(s)) browser = '微信';
+    else if (/QQBrowser|MQQBrowser/i.test(s)) browser = 'QQ 浏览器';
+    else if (/Quark/i.test(s)) browser = '夸克';
+    else if (/UCBrowser/i.test(s)) browser = 'UC';
+    else if (/baiduboxapp|BaiduBrowser/i.test(s)) browser = '百度';
+    else if (/Edg[A\/]/i.test(s)) browser = 'Edge';
+    else if (/Firefox|FxiOS/i.test(s)) browser = 'Firefox';
+    else if (/Chrome|CriOS/i.test(s)) browser = 'Chrome';
+    else if (/Safari/i.test(s)) browser = 'Safari';
+    else browser = s ? '其它' : '未知';
+
+    var m = s.match(/Android[^;)]*;\s*([^;)]+?)(?:\s+Build|;|\))/i);
+    var model = m && m[1] ? m[1].trim().replace(/^(wv|Mobile)\s*;?\s*/i, '').slice(0, 18) : '';
+    if (/Android TV|GoogleTV|SmartTV|SMART-TV|HuaweiTV|MiTV|TV Safari/i.test(s)) os = '电视';
+    else if (/iPhone/i.test(s)) os = 'iPhone';
+    else if (/iPad/i.test(s)) os = 'iPad';
+    else if (/Android/i.test(s)) os = model && !/^Android$/i.test(model) ? 'Android · ' + model : 'Android';
+    else if (/Windows NT 10|Windows NT 6/i.test(s)) os = 'Windows';
+    else if (/Mac OS X|Macintosh/i.test(s)) os = 'macOS';
+    else if (/Linux/i.test(s)) os = 'Linux';
+    else os = s ? '其它' : '未知';
+    return { os: os, browser: browser };
+  }
+
+  // 后端地址：网页走同源；电视端是 file:// 打开的，靠 ?api= 传进来
+  var API_BASE = (function () {
+    var m = location.search.match(/[?&]api=([^&]+)/);
+    return (window.API_BASE || (m ? decodeURIComponent(m[1]) : '')).replace(/\/+$/, '');
+  })();
+
+  function load() {
+    var token = tokenEl.value.trim();
+    msg('正在读取…', true);
+    fetch(API_BASE + '/api/tribute/stats', { headers: { 'X-Admin-Token': token }, cache: 'no-store' })
+      .then(function (res) {
+        return res.text().then(function (text) {
+          var data;
+          try { data = JSON.parse(text); } catch (err) { throw new Error('返回内容不是 JSON（可能后端没跑起来）'); }
+          if (res.status === 403) {
+            var e = new Error((data && data.error) || '需要后台口令');
+            e.needToken = true;
+            throw e;
+          }
+          if (!res.ok || !data || data.error) throw new Error((data && (data.detail || data.error)) || ('HTTP ' + res.status));
+          return data;
+        });
+      })
+      .then(function (data) {
+        loginBox.classList.remove('show');
+        countEl.textContent = Number(data.count || 0).toLocaleString('zh-CN');
+        updatedEl.textContent = '最近更新：' + fmtTime(data.updatedAt);
+        if (statSubEl) {
+          statSubEl.innerHTML = '真实打卡 <b>' + Number(data.realCount || 0).toLocaleString('zh-CN') +
+            '</b>　展示基数 <b>' + Number(data.base || 0).toLocaleString('zh-CN') + '</b>';
+        }
+        deviceCountEl.textContent = data.recent && data.recent.length ? '显示最近 ' + data.recent.length + ' 条' : '';
+        if (!data.recent || !data.recent.length) {
+          rowsEl.innerHTML = '<tr><td colspan="7" class="empty">还没有人打卡。</td></tr>';
+        } else {
+          rowsEl.innerHTML = data.recent.map(function (it) {
+            var u = parseUa(it.ua);
+            return '<tr>' +
+              '<td class="rank">#' + esc(it.rank || '—') + '</td>' +
+              '<td>' + esc(fmtTime(it.at)) + '</td>' +
+              '<td class="loc">' + esc(it.loc || '—') + '</td>' +
+              '<td class="ip"><code>' + esc(it.ip || '—') + '</code></td>' +
+              '<td><span class="tag os">' + esc(u.os) + '</span></td>' +
+              '<td><span class="tag bw">' + esc(u.browser) + '</span>' +
+                (it.ua ? ' <span class="tag" title="' + esc(it.ua) + '">UA</span>' : '') + '</td>' +
+              '<td><code>' + esc(it.id || '') + '</code></td>' +
+            '</tr>';
+          }).join('');
+        }
+        msg('已更新 · ' + new Date().toLocaleTimeString('zh-CN', { hour12: false }), true);
+        try { sessionStorage.setItem('wx_tribute_admin_token', token); } catch (err) { /* 忽略 */ }
+      })
+      .catch(function (err) {
+        if (err.needToken) {
+          loginBox.classList.add('show');
+          updatedEl.textContent = '需要后台口令';
+        } else {
+          updatedEl.textContent = '读取失败';
+        }
+        msg(err.message || '读取失败');
+      });
+  }
+
+  document.getElementById('enter').addEventListener('click', load);
+  document.getElementById('refresh').addEventListener('click', load);
+  tokenEl.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') load();
+  });
+
+  try {
+    var saved = sessionStorage.getItem('wx_tribute_admin_token');
+    if (saved) tokenEl.value = saved;
+  } catch (err) { /* 忽略 */ }
+
+  // 打开即读，不用点按钮；只有后端要求口令时才弹出输入框
+  try {
+    var qs = new URLSearchParams(location.search).get('token');
+    if (qs) tokenEl.value = qs;
+  } catch (err2) { /* 忽略 */ }
+  load();
+  setInterval(load, 15000);
+})();
+</script>
+</body>
+</html>

@@ -17,9 +17,24 @@ import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(fileURLToPath(new URL('../app/web', import.meta.url)));
+const PROJECT_ROOT = path.resolve(ROOT, '..', '..');
 const PORT = Number(process.env.PORT || 8787);
-const TRIBUTE_FILE = path.join(ROOT, '..', '..', '.cache', 'tribute.json');
+// 致敬数据放项目根目录，不放 .cache（那个目录会被清）
+const TRIBUTE_FILE = process.env.TRIBUTE_FILE
+  ? path.resolve(process.env.TRIBUTE_FILE)
+  : path.join(PROJECT_ROOT, 'tribute.json');
 const TRIBUTE_ADMIN_TOKEN = process.env.TRIBUTE_ADMIN_TOKEN || '';
+// 致敬墙的展示基数：真实打卡数会叠加在这个数上，看起来更像一面有人气的墙
+const TRIBUTE_BASE = Math.max(0, Number(process.env.TRIBUTE_BASE) || 10000);
+
+// 可选：致敬数据落到 GitHub 仓库，电脑 / 电视 / 手机读的是同一份
+const GH = {
+  repo: (process.env.GITHUB_REPO || '').trim(),
+  token: (process.env.GITHUB_TOKEN || '').trim(),
+  file: (process.env.GITHUB_PATH || 'tribute.json').trim().replace(/^\/+/, ''),
+  branch: (process.env.GITHUB_BRANCH || 'main').trim()
+};
+const GH_ON = !!(GH.repo && GH.token);
 const SITE = 'https://www.doubaozhibo.com';
 const QQ = 'https://matchweb.sports.qq.com';
 const NBA_ID = '100000'; // 腾讯体育的 NBA 赛事 ID
@@ -778,6 +793,45 @@ function tributeDevice(raw) {
   return /^[A-Za-z0-9_-]{16,64}$/.test(id) ? id : '';
 }
 
+// 取访客 IP：优先反代头，其次 socket；去掉 IPv6 映射前缀
+function clientIp(req) {
+  const xf = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  const real = String(req.headers['x-real-ip'] || '').trim();
+  return (xf || real || req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+}
+
+const IP_LOC_CACHE = new Map();
+
+function isPrivateIp(ip) {
+  return /^(127\.|10\.|169\.254\.|192\.168\.|::1$|localhost$)/i.test(ip) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(ip);
+}
+
+// 用免费接口把 IP 翻成省市（失败就返回空，不影响打卡）
+async function ipLocation(ip) {
+  if (!ip) return '';
+  if (isPrivateIp(ip)) return '内网';
+  if (IP_LOC_CACHE.has(ip)) return IP_LOC_CACHE.get(ip);
+  let loc = '';
+  try {
+    const r = await request(
+      `http://ip-api.com/json/${encodeURIComponent(ip)}?lang=zh-CN&fields=status,country,regionName,city,isp`,
+      false,
+      0,
+      ''
+    );
+    const data = JSON.parse(r.text);
+    if (data && data.status === 'success') {
+      loc = [data.country, data.regionName, data.city].filter(Boolean).join(' · ');
+      if (data.isp) loc += ' · ' + data.isp;
+    }
+  } catch {
+    /* 网络不通或超限，留空 */
+  }
+  if (IP_LOC_CACHE.size < 2000) IP_LOC_CACHE.set(ip, loc);
+  return loc;
+}
+
 function readRequestBody(req, limit = 4096) {
   return new Promise((resolve) => {
     let raw = '';
@@ -790,7 +844,128 @@ function readRequestBody(req, limit = 4096) {
   });
 }
 
+// ---------------- 致敬墙：GitHub 存储（多端共用一份数据） ----------------
+
+function ghUrl() {
+  const p = GH.file.split('/').map(encodeURIComponent).join('/');
+  return `https://api.github.com/repos/${GH.repo}/contents/${p}`;
+}
+
+async function ghRequest(method, body) {
+  const url = method === 'GET' ? `${ghUrl()}?ref=${encodeURIComponent(GH.branch)}` : ghUrl();
+  const headers = {
+    Authorization: 'Bearer ' + GH.token,
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+    'User-Agent': 'wuxie-tribute'
+  };
+  if (body) headers['Content-Type'] = 'application/json';
+  return fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
+}
+
+async function ghLoadDoc() {
+  const res = await ghRequest('GET');
+  if (res.status === 404) return { doc: { devices: {}, updatedAt: '' }, sha: '' };
+  if (!res.ok) throw new Error('GitHub 读取失败 HTTP ' + res.status);
+  const data = await res.json();
+  let doc = { devices: {}, updatedAt: '' };
+  try { doc = JSON.parse(Buffer.from(data.content || '', 'base64').toString('utf8')) || doc; } catch { /* 空文件 */ }
+  if (!doc.devices || typeof doc.devices !== 'object') doc.devices = {};
+  return { doc, sha: data.sha || '' };
+}
+
+async function ghSaveDoc(doc, sha) {
+  const body = {
+    message: 'tribute: ' + new Date().toISOString(),
+    content: Buffer.from(JSON.stringify(doc, null, 2), 'utf8').toString('base64'),
+    branch: GH.branch
+  };
+  if (sha) body.sha = sha;
+  const res = await ghRequest('PUT', body);
+  if (!res.ok) throw new Error('GitHub 写入失败 HTTP ' + res.status);
+}
+
+async function handleTributeGh(req, res, url) {
+  let payload = {};
+  if (req.method === 'POST') {
+    const raw = await readRequestBody(req);
+    try { payload = raw ? JSON.parse(raw) : {}; } catch { payload = {}; }
+  }
+  const id = tributeDevice(url.searchParams.get('device') || payload.deviceId);
+  if (!id) return json(res, 400, { error: 'device 不合法' });
+
+  const hash = tributeHash(id);
+  let doc, sha;
+  try { ({ doc, sha } = await ghLoadDoc()); }
+  catch (err) { return json(res, 503, { error: '致敬数据读取失败', detail: err.message }); }
+
+  const devices = doc.devices;
+  const count = Object.keys(devices).length;
+  const entry = devices[hash];
+
+  if (req.method === 'POST') {
+    if (!entry) {
+      const now = new Date().toISOString();
+      const ip = clientIp(req);
+      const rec = {
+        at: now,
+        rank: count + 1,
+        ip,
+        loc: await ipLocation(ip),
+        ua: String(req.headers['user-agent'] || '').slice(0, 400),
+        ref: String(req.headers['referer'] || '').slice(0, 300)
+      };
+      devices[hash] = rec;
+      doc.updatedAt = now;
+      try { await ghSaveDoc(doc, sha); }
+      catch (err) {
+        delete devices[hash];
+        return json(res, 503, { error: '致敬写入失败', detail: err.message });
+      }
+      return json(res, 200, { count: TRIBUTE_BASE + rec.rank, mine: true, rank: TRIBUTE_BASE + rec.rank, added: true, store: 'github' });
+    }
+    return json(res, 200, { count: TRIBUTE_BASE + count, mine: true, rank: TRIBUTE_BASE + (entry.rank || 0), added: false, store: 'github' });
+  }
+
+  if (req.method !== 'GET' && req.method !== 'HEAD') return json(res, 405, { error: '只支持 GET / POST' });
+  return json(res, 200, {
+    count: TRIBUTE_BASE + count,
+    mine: !!entry,
+    rank: entry ? TRIBUTE_BASE + (entry.rank || 0) : 0,
+    store: 'github'
+  });
+}
+
+function handleTributeStatsGh(req, res, url) {
+  const token = url.searchParams.get('token') || req.headers['x-admin-token'] || '';
+  if (TRIBUTE_ADMIN_TOKEN && token !== TRIBUTE_ADMIN_TOKEN) {
+    return json(res, 403, { error: '后台口令不正确' });
+  }
+  return ghLoadDoc().then(({ doc }) => {
+    const devices = doc.devices || {};
+    const keys = Object.keys(devices);
+    const recent = keys.map((hash) => ({
+      id: hash.slice(0, 8),
+      at: devices[hash].at || '',
+      rank: TRIBUTE_BASE + (devices[hash].rank || 0),
+      ip: devices[hash].ip || '',
+      loc: devices[hash].loc || '',
+      ua: devices[hash].ua || '',
+      ref: devices[hash].ref || ''
+    })).sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, 50);
+    return json(res, 200, {
+      count: TRIBUTE_BASE + keys.length,
+      realCount: keys.length,
+      base: TRIBUTE_BASE,
+      updatedAt: doc.updatedAt || '',
+      recent,
+      store: 'github'
+    });
+  }).catch((err) => json(res, 503, { error: '致敬数据读取失败', detail: err.message }));
+}
+
 async function handleTribute(req, res, url) {
+  if (GH_ON) return handleTributeGh(req, res, url);
   let payload = {};
   if (req.method === 'POST') {
     const raw = await readRequestBody(req);
@@ -809,33 +984,58 @@ async function handleTribute(req, res, url) {
     let added = false;
     if (!entry) {
       const rank = count + 1;
-      entry = devices[hash] = { at: new Date().toISOString(), rank };
-      store.updatedAt = new Date().toISOString();
+      const ip = clientIp(req);
+      entry = devices[hash] = {
+        at: new Date().toISOString(),
+        rank,
+        ip,
+        loc: await ipLocation(ip),
+        ua: String(req.headers['user-agent'] || '').slice(0, 400),
+        ref: String(req.headers['referer'] || '').slice(0, 300)
+      };
+      store.updatedAt = entry.at;
       saveTributeStore(store);
       added = true;
     }
-    return json(res, 200, { count: Object.keys(devices).length, mine: true, rank: entry.rank || 0, added });
+    return json(res, 200, {
+      count: TRIBUTE_BASE + Object.keys(devices).length,
+      mine: true,
+      rank: TRIBUTE_BASE + (entry.rank || 1),
+      added
+    });
   }
 
   if (req.method !== 'GET' && req.method !== 'HEAD') return json(res, 405, { error: '只支持 GET / POST' });
   const entry = devices[hash];
-  return json(res, 200, { count, mine: !!entry, rank: entry ? entry.rank || 0 : 0 });
+  return json(res, 200, {
+    count: TRIBUTE_BASE + count,
+    mine: !!entry,
+    rank: entry ? TRIBUTE_BASE + (entry.rank || 0) : 0
+  });
 }
 
 function handleTributeStats(req, res, url) {
+  if (GH_ON) return handleTributeStatsGh(req, res, url);
   const token = url.searchParams.get('token') || req.headers['x-admin-token'] || '';
   if (TRIBUTE_ADMIN_TOKEN && token !== TRIBUTE_ADMIN_TOKEN) {
     return json(res, 403, { error: '后台口令不正确' });
   }
   const store = readTributeStore();
   const devices = store.devices || {};
-  const recent = Object.keys(devices).map((hash) => ({
+  const keys = Object.keys(devices);
+  const recent = keys.map((hash) => ({
     id: hash.slice(0, 8),
     at: devices[hash].at || '',
-    rank: devices[hash].rank || 0
-  })).sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, 30);
+    rank: TRIBUTE_BASE + (devices[hash].rank || 0),
+    ip: devices[hash].ip || '',
+    loc: devices[hash].loc || '',
+    ua: devices[hash].ua || '',
+    ref: devices[hash].ref || ''
+  })).sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, 50);
   return json(res, 200, {
-    count: Object.keys(devices).length,
+    count: TRIBUTE_BASE + keys.length,
+    realCount: keys.length,
+    base: TRIBUTE_BASE,
     updatedAt: store.updatedAt || '',
     recent
   });

@@ -91,6 +91,10 @@
   // 全屏时上一次按 OK 的时间，用于识别「双击退出全屏」
   var fullOkAt = 0;
 
+  // 「李无邪」连按两下进后台：记录上一次点击时间与延迟打开作者弹框的定时器
+  var authorTapAt = 0;
+  var authorTimer = 0;
+
   var el = {
     nav: document.getElementById('nav'),
     updated: document.getElementById('updated'),
@@ -1636,6 +1640,7 @@
     tribute: {
       enabled: true,
       api: '',
+      base: 10000,
       title: '致敬曼巴',
       desc: '点亮一盏灯，把想说的话留在斯台普斯。',
       note: '按一下，点亮属于你的一盏灯'
@@ -1668,6 +1673,7 @@
       tribute: {
         enabled: !raw.tribute || raw.tribute.enabled !== false,
         api: String((raw.tribute && raw.tribute.api) || ''),
+        base: Math.max(0, Number(raw.tribute && raw.tribute.base) || 10000),
         title: String((raw.tribute && raw.tribute.title) || '致敬曼巴'),
         desc: String((raw.tribute && raw.tribute.desc) || '点亮一盏灯，把想说的话留在斯台普斯。'),
         note: String((raw.tribute && raw.tribute.note) || '按一下，点亮属于你的一盏灯')
@@ -1838,7 +1844,10 @@
   function paintTribute() {
     if (!el.ktBtn) return;
     var c = state.tribute;
-    el.ktCount.textContent = fmtTributeCount(c.count);
+    var cfg = tributeCfg();
+    // 接口还没回来时先显示基数，别让墙上挂个“—”
+    var shown = (c.count === null || typeof c.count === 'undefined') ? cfg.base : c.count;
+    el.ktCount.textContent = fmtTributeCount(shown);
     el.ktBtn.classList.toggle('is-done', !!c.mine);
     el.ktBtn.classList.toggle('is-loading', !!c.loading);
     el.ktBtn.setAttribute('aria-busy', c.loading ? 'true' : 'false');
@@ -1926,9 +1935,10 @@
         state.tribute.loading = false;
         paintTribute();
         if (el.ktNote && !state.tribute.mine) {
-          el.ktNote.textContent = '致敬服务连接中，先按一下也能留下记录';
-          el.ktNote.className = 'kt-note';
+          el.ktNote.textContent = '致敬墙暂时没连上，稍后再试';
+          el.ktNote.className = 'kt-note is-err';
         }
+        if (window.console) console.warn('[tribute]', err && err.message);
         return state.tribute;
       });
     return tributeReq;
@@ -1968,26 +1978,16 @@
       .then(function (data) {
         applyTributePayload(data, true);
       })
-      .catch(function () {
-        // 离线时先记在本机，下次打开会自动补传；不影响按钮手感
-        var cached = readTributeCache();
-        var next = (typeof cached.count === 'number' ? cached.count : 0) + 1;
-        state.tribute.count = next;
-        state.tribute.mine = true;
-        state.tribute.pending = true;
-        state.tribute.rank = next;
+      .catch(function (err) {
+        // 服务端连不上就如实报错，不再本机自增——否则同一台设备点几次就多几个人
         state.tribute.loading = false;
         state.tribute.loaded = false;
-        writeTributeCache({ count: next, mine: true, rank: next, pending: true });
         paintTribute();
-        el.ktNote.textContent = '本机已致敬 · 联网后会自动同步';
-        el.ktNote.className = 'kt-note is-ok';
-        if (el.ktBtn) {
-          el.ktBtn.classList.remove('is-pop');
-          void el.ktBtn.offsetWidth;
-          el.ktBtn.classList.add('is-pop');
-          setTimeout(function () { el.ktBtn.classList.remove('is-pop'); }, 900);
+        if (el.ktNote) {
+          el.ktNote.textContent = '致敬墙暂时没连上，稍后再试';
+          el.ktNote.className = 'kt-note is-err';
         }
+        if (window.console) console.warn('[tribute]', err && err.message);
       });
   }
 
@@ -1995,7 +1995,7 @@
     if (!el.tribute) return;
     ensureTributeDevice();
     var cached = readTributeCache();
-    if (typeof cached.count === 'number') state.tribute.count = cached.count;
+    state.tribute.count = typeof cached.count === 'number' ? cached.count : tributeCfg().base;
     state.tribute.mine = !!cached.mine;
     state.tribute.pending = !!cached.pending;
     state.tribute.rank = Number(cached.rank) || 0;
@@ -2985,10 +2985,30 @@
       return;
     }
 
-    // 致敬曼巴：匿名打卡按钮
-    var tributeBtn = target.closest('#kt-btn');
-    if (tributeBtn) {
-      setFocus(tributeBtn, true);
+    // 连按两下「李无邪」→ 致敬后台（电视遥控器连按两次 OK 也算）
+    var authorBtn = target.closest('[data-action="author"]');
+    if (authorBtn) {
+      var nowTap = Date.now();
+      if (nowTap - authorTapAt < 700) {
+        authorTapAt = 0;
+        if (authorTimer) { clearTimeout(authorTimer); authorTimer = 0; }
+        // 带上当前后端地址（电视端是 http://127.0.0.1:8099），后台页才知道去哪取数据
+        location.href = 'admin.html' + (API_BASE ? '?api=' + encodeURIComponent(API_BASE) : '');
+        return;
+      }
+      authorTapAt = nowTap;
+      if (authorTimer) clearTimeout(authorTimer);
+      authorTimer = setTimeout(function () {
+        authorTimer = 0;
+        openAuthor();
+      }, 300);
+      return;
+    }
+
+    // 致敬曼巴：整块可点（按钮、数字、标题、空白处都算）
+    var tributeBox = target.closest('#kobe-tribute');
+    if (tributeBox) {
+      setFocus(tributeBox, true);
       sendTribute();
       return;
     }

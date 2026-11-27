@@ -57,6 +57,12 @@ public class TvServer {
     private static final String UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             + "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
+    /**
+     * 致敬曼巴打卡墙：电视端不做本地存储，全部转发到线上同一份后端，
+     * 这样电脑、手机、电视看到的是同一份数据。可用 -D 参数或代码改这里换地址。
+     */
+    public static String TRIBUTE_CLOUD = "https://37losonelorqwuwhzj1.traesite.cn";
+
     private static final long TTL_FOREVER = -1L;
     private static final long TTL_REPLAY = -2L;
     private static final long TTL_DAY = -3L;
@@ -186,9 +192,15 @@ public class TvServer {
             }
 
             Map<String, String> qs = parseQuery(query);
+            String method = parts[0] == null ? "GET" : parts[0].toUpperCase(java.util.Locale.ROOT);
             if (path.equals("/api/bili/video")) {
                 // 视频要支持 Range 流式转发，不能整段读进内存
                 streamBiliVideo(s.getOutputStream(), qs.get("bv"), rangeHeader);
+                return;
+            }
+            if (path.startsWith("/api/tribute")) {
+                // 统一走线上后端，保证电视和电脑是同一份打卡数据
+                write(s.getOutputStream(), proxyTribute(path, query, "POST".equals(method)));
                 return;
             }
             Response res;
@@ -218,8 +230,54 @@ public class TvServer {
         out.flush();
     }
 
-    private static String statusText(int code) {
-        switch (code) {
+    /**
+     * 把 /api/tribute、/api/tribute/stats 原样转发到线上，读和写都走云端同一份存储。
+     */
+    private Response proxyTribute(String path, String query, boolean post) {
+        HttpURLConnection conn = null;
+        try {
+            String target = TRIBUTE_CLOUD + path + (query == null || query.isEmpty() ? "" : "?" + query);
+            conn = (HttpURLConnection) new URL(target).openConnection();
+            conn.setConnectTimeout(8000);
+            conn.setReadTimeout(15000);
+            conn.setInstanceFollowRedirects(false);
+            conn.setRequestProperty("User-Agent", UA);
+            conn.setRequestProperty("Accept", "application/json");
+            if (post) {
+                conn.setRequestMethod("POST");
+                conn.setDoOutput(true);
+                // 设备号在 query 里，body 只要是个合法 JSON 即可
+                byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
+                conn.setFixedLengthStreamingMode(body.length);
+                OutputStream os = conn.getOutputStream();
+                os.write(body);
+                os.flush();
+                os.close();
+            }
+            int code = conn.getResponseCode();
+            InputStream is = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
+            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+            if (is != null) {
+                byte[] chunk = new byte[4096];
+                int n;
+                while ((n = is.read(chunk)) > 0) buffer.write(chunk, 0, n);
+                is.close();
+            }
+            byte[] data = buffer.toByteArray();
+            if (data.length == 0) {
+                data = ("{\"error\":\"云端无返回\",\"status\":" + code + "}")
+                        .getBytes(StandardCharsets.UTF_8);
+            }
+            return new Response(code, "application/json; charset=utf-8", data, "no-store");
+        } catch (Exception e) {
+            return json(502, map("error", "致敬墙暂时连不上云端，稍后再试",
+                    "detail", String.valueOf(e.getMessage())));
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    private static String statusText(int code) {        switch (code) {
             case 200: return "OK";
             case 206: return "Partial Content";
             case 400: return "Bad Request";
