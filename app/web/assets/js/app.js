@@ -1821,13 +1821,53 @@
     return tributeIpCached();
   }
 
-  function probeIp(url, pick) {
-    return fetch(url, { cache: 'no-store' }).then(function (res) {
-      return res.text();
-    }).then(function (text) {
-      var v = ipOk(pick(text));
-      if (!v) throw new Error('no ip');
-      return v;
+  // 多个回显服务并列，谁先回谁算；返回体不管是 JSON 还是纯文本，都取里面第一个 IPv4
+  var TRIBUTE_IP_SOURCES = [
+    'https://ipinfo.io/json',
+    'https://api.ip.sb/ip',
+    'https://myip.ipip.net',
+    'https://ifconfig.me/ip',
+    'https://www.cloudflare.com/cdn-cgi/trace',
+    'https://ipapi.co/ip/'
+  ];
+
+  function parseIpFrom(text) {
+    var v = '';
+    try {
+      var j = JSON.parse(text);
+      if (j && j.ip) v = j.ip;
+    } catch (err) { /* 不是 JSON 就往下走 */ }
+    if (!v) {
+      var m = /(\d{1,3}(?:\.\d{1,3}){3})/.exec(String(text || ''));
+      if (m) v = m[1];
+    }
+    return ipOk(v);
+  }
+
+  function probeIp(url) {
+    return new Promise(function (resolve, reject) {
+      var done = false;
+      var timer = setTimeout(function () {
+        if (done) return;
+        done = true;
+        reject(new Error('timeout'));
+      }, 3000);
+      fetch(url, { cache: 'no-store', mode: 'cors' })
+        .then(function (res) { return res.text(); })
+        .then(function (text) {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          var v = parseIpFrom(text);
+          if (v) resolve(v);
+          else reject(new Error('no ip'));
+        })
+        .catch(function (err) {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          reject(err);
+        });
     });
   }
 
@@ -1836,17 +1876,7 @@
     if (cached) return Promise.resolve(cached);
     if (tributeIpReq) return tributeIpReq;
 
-    var probes = [
-      function () { return probeIp('https://api.ipify.org?format=json', function (t) { try { return JSON.parse(t).ip; } catch (e) { return ''; } }); },
-      function () { return probeIp('https://api.ip.sb/ip', function (t) { return t; }); },
-      function () { return probeIp('https://ipapi.co/ip/', function (t) { return t; }); },
-      function () {
-        return probeIp('https://www.cloudflare.com/cdn-cgi/trace', function (t) {
-          var m = /^ip=(.+)$/m.exec(t);
-          return m ? m[1] : '';
-        });
-      }
-    ];
+    var probes = TRIBUTE_IP_SOURCES.map(function (u) { return probeIp(u); });
 
     tributeIpReq = new Promise(function (resolve) {
       var left = probes.length;
@@ -1861,8 +1891,8 @@
         }
         resolve(v || '');
       }
-      probes.forEach(function (fn) {
-        fn().then(finish).catch(function () {
+      probes.forEach(function (p) {
+        p.then(finish).catch(function () {
           left -= 1;
           if (left <= 0) finish('');
         });

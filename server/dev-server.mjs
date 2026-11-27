@@ -802,9 +802,15 @@ function clientIp(req) {
 
 const IP_LOC_CACHE = new Map();
 
-function isPrivateIp(ip) {
-  return /^(127\.|10\.|169\.254\.|192\.168\.|::1$|localhost$)/i.test(ip) ||
+function isPrivateIp(ip) {  return /^(127\.|10\.|169\.254\.|192\.168\.|::1$|localhost$)/i.test(ip) ||
     /^172\.(1[6-9]|2\d|3[01])\./.test(ip);
+}
+
+// 前端自己报上来的公网 IP（托管平台会剥掉 IP 头，只能靠浏览器自报）
+function publicIp(v) {
+  const s = String(v || '').trim().replace(/^::ffff:/, '');
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(s) || isPrivateIp(s)) return '';
+  return s.slice(0, 64);
 }
 
 // 用免费接口把 IP 翻成省市（失败就返回空，不影响打卡）
@@ -906,7 +912,7 @@ async function handleTributeGh(req, res, url) {
   if (req.method === 'POST') {
     if (!entry) {
       const now = new Date().toISOString();
-      const ip = clientIp(req);
+      const ip = publicIp(payload.ip) || clientIp(req);
       const rec = {
         at: now,
         rank: count + 1,
@@ -984,7 +990,7 @@ async function handleTribute(req, res, url) {
     let added = false;
     if (!entry) {
       const rank = count + 1;
-      const ip = clientIp(req);
+      const ip = publicIp(payload.ip) || clientIp(req);
       entry = devices[hash] = {
         at: new Date().toISOString(),
         rank,
