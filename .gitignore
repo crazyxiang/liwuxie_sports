@@ -27,3 +27,7 @@ tribute.json.tmp
 
 # 打包产物（EdgeOne/Trae 上传用，由 app/web 生成）
 deploy/
+
+build-apk/
+
+trae-env.txt

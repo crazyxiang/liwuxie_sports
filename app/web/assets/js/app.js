@@ -22,6 +22,9 @@
     return API_BASE + path;
   }
 
+  // 线上唯一数据源：电视 / 手机 App 里打卡直连这里，保证和网页是同一份数据
+  var TRIBUTE_CLOUD = 'https://37losonelorqwuwhzj1.traesite.cn';
+
   // NBA 30 支球队的中文名 → 本地队徽文件名
   var TEAM_LOGO = {
     老鹰: 'atl', 凯尔特人: 'bos', 篮网: 'bkn', 黄蜂: 'cha', 公牛: 'chi', 骑士: 'cle',
@@ -1815,9 +1818,13 @@
 
   function tributeApiUrl() {
     var base = String(tributeCfg().api || '').trim();
-    if (!base) return api('/api/tribute');
-    if (/^https?:\/\//i.test(base)) return base;
-    return api(base.charAt(0) === '/' ? base : '/' + base);
+    if (base) {
+      if (/^https?:\/\//i.test(base)) return base;
+      return api(base.charAt(0) === '/' ? base : '/' + base);
+    }
+    // App / 电视端：后端只是本机服务，打卡必须直连线上，才能和网页共用一份数据
+    if (API_BASE) return TRIBUTE_CLOUD + '/api/tribute';
+    return api('/api/tribute');
   }
 
   function withTributeDevice(url) {

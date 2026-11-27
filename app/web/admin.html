@@ -247,7 +247,12 @@
   // 后端地址：网页走同源；电视端是 file:// 打开的，靠 ?api= 传进来
   var API_BASE = (function () {
     var m = location.search.match(/[?&]api=([^&]+)/);
-    return (window.API_BASE || (m ? decodeURIComponent(m[1]) : '')).replace(/\/+$/, '');
+    var b = (window.API_BASE || (m ? decodeURIComponent(m[1]) : '')).replace(/\/+$/, '');
+    // 本机服务（电视 / App）没有打卡接口，统一去线上取同一份数据
+    if (/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(b)) {
+      b = 'https://37losonelorqwuwhzj1.traesite.cn';
+    }
+    return b;
   })();
 
   function load() {
