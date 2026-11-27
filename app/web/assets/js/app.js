@@ -1148,6 +1148,9 @@
 
   var heroIdx = 0;
   var heroTimer = null;
+  var heroShownAt = 0;
+  var heroWait = 5000;
+  var heroBusy = false;
   var heroDragState = null;
   var heroDragBlock = false;
 
@@ -1200,6 +1203,17 @@
   }
 
   function applyHeroSlide(i) {
+    // 任何一步出错（电视上视频播不了、codec 不支持都可能抛异常）都不能把轮播带死
+    try {
+      applyHeroSlideInner(i);
+    } catch (err) {
+      if (window.console) console.warn('[hero]', err && err.message);
+      heroShownAt = Date.now();
+      try { restartHeroTimer(); } catch (err2) { /* 忽略 */ }
+    }
+  }
+
+  function applyHeroSlideInner(i) {
     var slides = heroSlides();
     if (!slides.length) return;
     heroIdx = (i + slides.length) % slides.length;
@@ -1216,8 +1230,13 @@
             try { vid.currentTime = 0; } catch (err) { /* 忽略 */ }
           }
           if (slide.autoplay !== false) {
-            var p = vid.play();
-            if (p && p.catch) p.catch(function () { syncHeroPlayBtn(); });
+            try {
+              var p = vid.play();
+              if (p && p.catch) p.catch(function () { syncHeroPlayBtn(); });
+            } catch (errPlay) {
+              // 电视上自动播放可能直接被拒，按图片节奏继续切
+              syncHeroPlayBtn();
+            }
           } else {
             try { vid.pause(); } catch (err2) { /* 忽略 */ }
           }
@@ -1274,6 +1293,7 @@
     clearInterval(heroTimer);
     clearTimeout(heroTimer);
     heroTimer = null;
+    heroShownAt = Date.now();
     if (heroSlides().length < 2) return;
 
     var s = heroSlides()[heroIdx];
@@ -1285,11 +1305,22 @@
       var dur = (isFinite(v.duration) && v.duration > 0) ? v.duration * 1000 : wait;
       wait = Math.max(3000, dur + 700);
     }
+    heroWait = wait;
 
-    heroTimer = setTimeout(function () {
+    // 不用一次性 setTimeout：电视 WebView 上视频事件偶尔不回调，一断就永远停。
+    // 改成每秒自检的看门狗，超时就强制切下一张，保证永远在转。
+    heroTimer = setInterval(function () {
       if (state.screen !== 'kobe') return;
-      applyHeroSlide(heroIdx + 1);
-    }, wait);
+      if (document.hidden) { heroShownAt = Date.now(); return; }
+      if (Date.now() - heroShownAt < heroWait) return;
+      if (heroBusy) return;
+      heroBusy = true;
+      try {
+        applyHeroSlide(heroIdx + 1);
+      } finally {
+        heroBusy = false;
+      }
+    }, 500);
   }
 
   function resetHeroMediaShift() {
